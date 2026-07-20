@@ -1,3 +1,6 @@
 /CXR
 /Model/BSNet/checkpoints
+/Model/checkpoints
 /Model/SegSTN/weights
+**/__pycache__/
+*.pyc
