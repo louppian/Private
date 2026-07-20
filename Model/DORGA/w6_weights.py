@@ -603,12 +603,16 @@ def run_one_scorer(name, mode, seed, epochs, cache2026, root,
         scorer.train(True)
         if frozen:
             scorer.backbone_bn_eval()
+        tr_P, tr_Y = [], []
         for img, mask, y in tqdm(train_loader, desc=f"  [{epoch:03d}] train", leave=False):
             img, mask, y = img.to(DEVICE), mask.to(DEVICE), y.to(DEVICE)
             out = scorer(img, mask=mask, target=y)
             loss, _ = scorer.compute_loss(out, y)
             optimizer.zero_grad(); loss.backward(); optimizer.step()
+            tr_P.append(out["logits"].detach().argmax(-1).cpu()); tr_Y.append(y.detach().cpu())
 
+        tr_P, tr_Y = torch.cat(tr_P).numpy(), torch.cat(tr_Y).numpy()
+        tr_acc, tr_bias = (tr_P == tr_Y).mean(), (tr_P - tr_Y).mean()
         v_acc, v_mae, v_bias, _, _, _ = evaluate_scorer(scorer, val_loader)
         tag = ""
         if v_mae < best_val:
@@ -622,14 +626,17 @@ def run_one_scorer(name, mode, seed, epochs, cache2026, root,
 
         do_test = (epoch % eval_test_every == 0) or (epoch > epochs - TAIL_EPOCHS) or (epoch == epochs)
         if do_test:
-            t_acc, t_mae, t_bias, _, _, _ = evaluate_scorer(scorer, test_loader)
-            hist.append(dict(epoch=epoch, val_bias=float(v_bias), test_bias=float(t_bias),
-                             test_acc=float(t_acc), test_mae=float(t_mae)))
-            print(f"  [{epoch:03d}/{epochs}] val ACC {v_acc:.4f} MAE {v_mae:.4f} | "
-                  f"TEST({TEST_Y}) ACC {t_acc:.4f} MAE {t_mae:.4f} bias {t_bias:+.4f}{tag}")
+            t_acc, t_mae, t_bias, t_per, _, _ = evaluate_scorer(scorer, test_loader)
+            hist.append(dict(epoch=epoch, tr_bias=float(tr_bias), val_bias=float(v_bias),
+                             test_bias=float(t_bias), test_acc=float(t_acc), test_mae=float(t_mae)))
+            roi_bias = "  ".join(f"{r} {t_per[r][2]:+.3f}" for r in ROI)
+            print(f"  [{epoch:03d}/{epochs}] train ACC {tr_acc:.4f} bias {tr_bias:+.4f} | "
+                  f"val ACC {v_acc:.4f} MAE {v_mae:.4f} bias {v_bias:+.4f} | "
+                  f"TEST({TEST_Y}) ACC {t_acc:.4f} MAE {t_mae:.4f} bias {t_bias:+.4f} | [{roi_bias}]{tag}")
         else:
-            hist.append(dict(epoch=epoch, val_bias=float(v_bias)))
-            print(f"  [{epoch:03d}/{epochs}] val ACC {v_acc:.4f} MAE {v_mae:.4f}{tag}")
+            hist.append(dict(epoch=epoch, tr_bias=float(tr_bias), val_bias=float(v_bias)))
+            print(f"  [{epoch:03d}/{epochs}] train ACC {tr_acc:.4f} bias {tr_bias:+.4f} | "
+                  f"val ACC {v_acc:.4f} MAE {v_mae:.4f} bias {v_bias:+.4f}{tag}")
 
         if EARLYSTOP_PATIENCE and since_improve >= EARLYSTOP_PATIENCE:
             print(f"  ⏹ early stop @epoch {epoch} (best={best_epoch})")
