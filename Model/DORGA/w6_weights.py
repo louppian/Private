@@ -68,7 +68,7 @@ from scorer import (                                                # noqa: E402
 BASE      = "/shared/home/mai/JeongGeon/Private"
 MERGED    = Path(f"{BASE}/CXR/Merged")               # labels.csv image_path 의 기준 폴더
 IMG_DIR   = Path(f"{BASE}/CXR/Merged/images_normalize")   # ★ seg+STN 정렬 완료 이미지 <uid>.png
-MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks_normalize")    # ★ 정렬 마스크 <uid>.png
+MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks")              # ★ 정렬 마스크 <uid>.png
 CSV_PATH  = f"{BASE}/CXR/Merged/labels.csv"          # uid, patient_id, RT, LT, RB, LB, image_path, …
 MRM_W     = Path("/shared/home/mai/JeongGeon/MICCAI2026/MRM.pth")   # DORGA 백본
 OUT_ROOT  = Path(f"{BASE}/w6_out")                   # 산출물
