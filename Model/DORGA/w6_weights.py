@@ -82,7 +82,7 @@ IMG_SIZE     = 512
 R, C, K      = 4, 5, 7
 PROJ_DIM     = 768
 BATCH_SIZE   = 32
-FREEZE_BLOCKS = 6
+FREEZE_BLOCKS = 0          # 동결 없음 — 백본 전체 학습(1e-5) + 헤드(1e-4)
 VAL_FRAC     = 0.15
 TAIL_EPOCHS  = 5
 EARLYSTOP_PATIENCE = 10
@@ -495,7 +495,7 @@ def load_private_scorer(name):
     return mod.build_scorer
 
 
-def run_one_scorer(name, mode, seed, epochs, root, head_epochs=20, eval_test_every=1):
+def run_one_scorer(name, mode, seed, epochs, root, eval_test_every=1):
     set_seed(seed)
     df = pd.read_csv(CSV_PATH)
     df, TRAIN_Y, TEST_Y = make_split(df, mode, seed)
@@ -520,21 +520,11 @@ def run_one_scorer(name, mode, seed, epochs, root, head_epochs=20, eval_test_eve
     run_dir = root / f"{mode}_s{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    best_val, best_epoch, hist, since, optimizer, frozen = float("inf"), -1, [], 0, None, None
+    # freeze 없음 — 처음부터 백본(1e-5)+헤드(1e-4) 함께 학습
+    optimizer = scorer.make_optimizer(lr, backbone_lr=backbone_lr)
+    best_val, best_epoch, hist, since = float("inf"), -1, [], 0
     for epoch in range(1, epochs + 1):
-        if scorer.freeze_stage:
-            want = epoch <= head_epochs
-            if want != frozen:
-                scorer.freeze_backbone(want); frozen = want
-                optimizer = scorer.make_optimizer(lr, backbone_lr=backbone_lr)
-                print(f"  [stage] epoch {epoch}: backbone_frozen={want}")
-        elif optimizer is None:
-            frozen = False
-            optimizer = scorer.make_optimizer(lr, backbone_lr=backbone_lr)
-
         scorer.train(True)
-        if frozen:
-            scorer.backbone_bn_eval()
         tr_P, tr_Y = [], []
         for img, mask, y in tqdm(train_loader, desc=f"  [{epoch:03d}] train", leave=False):
             img, mask, y = img.to(DEVICE), mask.to(DEVICE), y.to(DEVICE)
