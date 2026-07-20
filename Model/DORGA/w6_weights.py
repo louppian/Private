@@ -66,9 +66,10 @@ from scorer import (                                                # noqa: E402
 
 # ═══════════════ 경로 — 서버 기준. 여기만 맞게 수정 ═══════════════
 BASE      = "/shared/home/mai/JeongGeon/Private"
-IMG_DIR   = Path(f"{BASE}/CXR/Merged/images")        # 정렬 이미지 <uid>.png (연도 무관)
-MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks")         # 정렬 마스크 <uid>.png
-CSV_PATH  = f"{BASE}/CXR/Merged/labels.csv"          # uid, patient_id, RT, LT, RB, LB, …
+MERGED    = Path(f"{BASE}/CXR/Merged")               # labels.csv image_path 의 기준 폴더
+IMG_DIR   = Path(f"{BASE}/CXR/Merged/images")        # 정렬 이미지
+MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks")         # 정렬 마스크
+CSV_PATH  = f"{BASE}/CXR/Merged/labels.csv"          # uid, patient_id, RT, LT, RB, LB, image_path, …
 MRM_W     = Path("/shared/home/mai/JeongGeon/MICCAI2026/MRM.pth")   # DORGA 백본
 OUT_ROOT  = Path(f"{BASE}/w6_out")                   # 산출물
 
@@ -239,17 +240,46 @@ def split_lungs_to_four(mask_bin, min_area=1000):
 # ═══════════════════════════════════════════════════════════
 _PHOTO = transforms.Compose([transforms.ToTensor(),
                              transforms.Normalize(NORM_MEAN, NORM_STD)])
+_EXTS = (".png", ".jpg", ".jpeg", ".PNG", ".JPG")
 
 
-def _load_img(uid):
-    im = Image.open(IMG_DIR / f"{uid}{EXT}").convert("L")
+def _first_existing(cands):
+    for c in cands:
+        if c is not None and Path(c).exists():
+            return Path(c)
+    return None
+
+
+def _resolve_img(uid, image_path=None):
+    """labels.csv 의 image_path(있으면) 우선, 없거나 없으면 <uid>.<확장자> 폴백."""
+    cands = []
+    if isinstance(image_path, str) and image_path:
+        cands.append(MERGED / image_path)                 # "images/<...>" 상대경로
+        cands.append(Path(image_path))                    # 절대경로인 경우
+    cands += [IMG_DIR / f"{uid}{e}" for e in _EXTS]
+    p = _first_existing(cands)
+    if p is None:
+        raise FileNotFoundError(
+            f"이미지 못 찾음 uid={uid}. 시도: {[str(c) for c in cands[:3]]} …")
+    return p
+
+
+def _resolve_mask(uid):
+    p = _first_existing([MASK_DIR / f"{uid}{e}" for e in _EXTS])
+    if p is None:
+        raise FileNotFoundError(f"마스크 못 찾음 uid={uid} in {MASK_DIR}")
+    return p
+
+
+def _load_img(uid, image_path=None):
+    im = Image.open(_resolve_img(uid, image_path)).convert("L")
     if im.size != (IMG_SIZE, IMG_SIZE):
         im = im.resize((IMG_SIZE, IMG_SIZE), Image.BILINEAR)
     return im
 
 
 def _load_mask_np(uid):
-    m = Image.open(MASK_DIR / f"{uid}{EXT}").convert("L")
+    m = Image.open(_resolve_mask(uid)).convert("L")
     if m.size != (IMG_SIZE, IMG_SIZE):
         m = m.resize((IMG_SIZE, IMG_SIZE), Image.NEAREST)
     return (np.asarray(m, dtype=np.float32) > 0).astype(np.float32)
@@ -261,6 +291,7 @@ class DorgaMaskDataset(Dataset):
     def __init__(self, df):
         self.df = df.reset_index(drop=True)
         self.pat_col = f"pattern{K}"
+        self.has_ip = "image_path" in df.columns
 
     def __len__(self):
         return len(self.df)
@@ -268,7 +299,7 @@ class DorgaMaskDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         uid = str(row[UID_COL])
-        x = _PHOTO(_load_img(uid))
+        x = _PHOTO(_load_img(uid, row["image_path"] if self.has_ip else None))
         if torch.isnan(x).any():
             x = torch.zeros_like(x)
         mask_np = _load_mask_np(uid)
@@ -290,6 +321,7 @@ class ScorerDataset(Dataset):
 
     def __init__(self, df):
         self.df = df.reset_index(drop=True)
+        self.has_ip = "image_path" in df.columns
 
     def __len__(self):
         return len(self.df)
@@ -297,7 +329,7 @@ class ScorerDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         uid = str(row[UID_COL])
-        x = _PHOTO(_load_img(uid))
+        x = _PHOTO(_load_img(uid, row["image_path"] if self.has_ip else None))
         if torch.isnan(x).any():
             x = torch.zeros_like(x)
         m = torch.from_numpy(_load_mask_np(uid))[None]                   # (1,H,W)
