@@ -67,8 +67,8 @@ from scorer import (                                                # noqa: E402
 # ═══════════════ 경로 — 서버 기준. 여기만 맞게 수정 ═══════════════
 BASE      = "/shared/home/mai/JeongGeon/Private"
 MERGED    = Path(f"{BASE}/CXR/Merged")               # labels.csv image_path 의 기준 폴더
-IMG_DIR   = Path(f"{BASE}/CXR/Merged/images")        # 정렬 이미지
-MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks")         # 정렬 마스크
+IMG_DIR   = Path(f"{BASE}/CXR/Merged/images_normalize")   # ★ seg+STN 정렬 완료 이미지 <uid>.png
+MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks_normalize")    # ★ 정렬 마스크 <uid>.png
 CSV_PATH  = f"{BASE}/CXR/Merged/labels.csv"          # uid, patient_id, RT, LT, RB, LB, image_path, …
 MRM_W     = Path("/shared/home/mai/JeongGeon/MICCAI2026/MRM.pth")   # DORGA 백본
 OUT_ROOT  = Path(f"{BASE}/w6_out")                   # 산출물
@@ -251,12 +251,11 @@ def _first_existing(cands):
 
 
 def _resolve_img(uid, image_path=None):
-    """labels.csv 의 image_path(있으면) 우선, 없거나 없으면 <uid>.<확장자> 폴백."""
-    cands = []
+    """정렬 이미지(images_normalize)의 <uid>.<확장자>를 우선. image_path 컬럼은
+    정렬 안 된 images/ 를 가리키므로 마지막 폴백으로만 둔다."""
+    cands = [IMG_DIR / f"{uid}{e}" for e in _EXTS]
     if isinstance(image_path, str) and image_path:
-        cands.append(MERGED / image_path)                 # "images/<...>" 상대경로
-        cands.append(Path(image_path))                    # 절대경로인 경우
-    cands += [IMG_DIR / f"{uid}{e}" for e in _EXTS]
+        cands += [MERGED / image_path, Path(image_path)]
     p = _first_existing(cands)
     if p is None:
         raise FileNotFoundError(
