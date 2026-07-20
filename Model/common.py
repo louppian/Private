@@ -25,7 +25,9 @@ common.py — 스코어링 모델(BSNet / PAFE / DORGA) 공통 계약·상수·�
     prepare_training(labels_all, tr_idx, va_idx, device) -> np.ndarray | None
         학습 전 1회 호출. 라벨 통계(프라이어 등)가 필요한 모델만 구현.
         전체 샘플 순서의 per-sample extras 배열을 반환하면 로더가 배치에 실어준다.
-    make_optimizer(lr) -> torch.optim.Optimizer
+    make_optimizer(lr, backbone_lr=None) -> torch.optim.Optimizer
+        backbone / 나머지(헤드) 2개 param group. backbone_lr=None 이면 lr 로 통일.
+        optimizer 종류는 클래스 속성 optimizer_cls 로 지정(기본 Adam).
     save_weights / load_weights
         내부 원본 모델(self.net)의 state_dict 기준 → 기존 체크포인트와 키 호환.
 """
@@ -84,6 +86,7 @@ class ScorerBase(nn.Module):
     needs_mask = False
     default_lr = 1e-4
     freeze_stage = False
+    optimizer_cls = torch.optim.Adam
 
     def __init__(self):
         super().__init__()
@@ -104,9 +107,21 @@ class ScorerBase(nn.Module):
     def prepare_training(self, labels_all, tr_idx, va_idx, device):
         return None
 
-    def make_optimizer(self, lr):
-        return torch.optim.Adam(
-            [p for p in self.parameters() if p.requires_grad], lr=lr)
+    def make_optimizer(self, lr, backbone_lr=None):
+        """backbone / 헤드(나머지) param group 분리. requires_grad=False 는 제외.
+
+        backbone_lr=None 이면 백본도 lr 를 쓴다(단일 학습률과 동일).
+        백본이 전부 frozen 이면 헤드 그룹만 만들어진다.
+        """
+        bb_ids = {id(p) for p in self.backbone.parameters()}
+        head = [p for p in self.parameters()
+                if p.requires_grad and id(p) not in bb_ids]
+        bb = [p for p in self.backbone.parameters() if p.requires_grad]
+        groups = [{"params": head, "lr": lr}]
+        if bb:
+            groups.append({"params": bb,
+                           "lr": lr if backbone_lr is None else backbone_lr})
+        return self.optimizer_cls(groups)
 
     # ── 공통 제공 ──
     def freeze_backbone(self, flag=True):

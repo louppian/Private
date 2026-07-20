@@ -169,6 +169,7 @@ class DorgaScorer(ScorerBase):
     needs_mask = True
     default_lr = 1e-4
     freeze_stage = False                     # 원 루틴대로 전체 파라미터 동시 학습
+    optimizer_cls = torch.optim.AdamW
 
     def __init__(self, classes=CLASSES, K=7, weights_path=None):
         super().__init__()
@@ -181,10 +182,6 @@ class DorgaScorer(ScorerBase):
     @property
     def backbone(self):
         return self.net.vit
-
-    def make_optimizer(self, lr):
-        return torch.optim.AdamW(
-            [p for p in self.parameters() if p.requires_grad], lr=lr)
 
     # ── forward: 마스크 -> rel/roi_masks 생성 후 원본 호출 ──
     def forward(self, img, mask=None, target=None):

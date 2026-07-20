@@ -133,9 +133,13 @@ def _fmt(stats, keys):
     return " ".join(f"{k} {stats[k]:.3f}" for k in keys if k in stats)
 
 
-def train(model_name="bsnet", epochs=80, batch=8, lr=None, head_epochs=20,
-          classes=CLASSES, workers=4, seed=0, **model_kw):
-    """model_kw 는 해당 scorer 의 build_scorer 로 그대로 전달된다.
+def train(model_name="bsnet", epochs=80, batch=8, lr=None, backbone_lr=None,
+          head_epochs=20, classes=CLASSES, workers=4, seed=0, **model_kw):
+    """lr 은 헤드(백본 외 전체) 학습률, backbone_lr 은 백본 인코더 학습률.
+    backbone_lr=None 이면 기존과 동일하게 백본도 헤드와 같은 학습률을 쓴다.
+    (freeze_stage 모델은 해제 시점부터 적용 — 그때 헤드는 기존대로 lr*0.3)
+
+    model_kw 는 해당 scorer 의 build_scorer 로 그대로 전달된다.
     예: train("bsnet", vertical_overlap=0.25), train("dorga", K=7, weights_path=...)"""
     assert model_name in MODELS, f"model 은 {list(MODELS)} 중 하나"
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -161,7 +165,8 @@ def train(model_name="bsnet", epochs=80, batch=8, lr=None, head_epochs=20,
                         pin_memory=True)
 
     print(f"[model] {model_name}  in_ch={scorer.in_channels}  "
-          f"mask={scorer.needs_mask}  lr={lr}  freeze_stage={scorer.freeze_stage}")
+          f"mask={scorer.needs_mask}  lr={lr}  backbone_lr={backbone_lr}  "
+          f"freeze_stage={scorer.freeze_stage}")
 
     best, optimizer, frozen = float("inf"), None, None
     for ep in range(1, epochs + 1):
@@ -170,12 +175,19 @@ def train(model_name="bsnet", epochs=80, batch=8, lr=None, head_epochs=20,
             if want_freeze != frozen:
                 scorer.freeze_backbone(want_freeze)
                 frozen = want_freeze
-                cur_lr = lr if want_freeze else lr * 0.3
-                optimizer = scorer.make_optimizer(cur_lr)
-                print(f"[stage] epoch {ep}: backbone_frozen={want_freeze}, lr={cur_lr}")
+                if want_freeze:
+                    # 백본 frozen -> 헤드 그룹만 생성됨
+                    optimizer = scorer.make_optimizer(lr)
+                    print(f"[stage] epoch {ep}: backbone_frozen=True, head_lr={lr}")
+                else:
+                    head_lr = lr * 0.3
+                    bb_lr = backbone_lr if backbone_lr is not None else head_lr
+                    optimizer = scorer.make_optimizer(head_lr, backbone_lr=bb_lr)
+                    print(f"[stage] epoch {ep}: backbone_frozen=False, "
+                          f"head_lr={head_lr}, backbone_lr={bb_lr}")
         elif optimizer is None:
             frozen = False
-            optimizer = scorer.make_optimizer(lr)
+            optimizer = scorer.make_optimizer(lr, backbone_lr=backbone_lr)
 
         tr = run_epoch(scorer, train_ld, device, optimizer, frozen)
         va = run_epoch(scorer, val_ld, device, None)
@@ -203,5 +215,7 @@ if __name__ == "__main__":
     ap.add_argument("--epochs", type=int, default=80)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--lr", type=float, default=None)
+    ap.add_argument("--backbone-lr", type=float, default=None)
     a = ap.parse_args()
-    train(a.model, epochs=a.epochs, batch=a.batch, lr=a.lr)
+    train(a.model, epochs=a.epochs, batch=a.batch, lr=a.lr,
+          backbone_lr=a.backbone_lr)
