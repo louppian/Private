@@ -135,9 +135,9 @@ def _fmt(stats, keys):
 
 def train(model_name="bsnet", epochs=80, batch=8, lr=None, backbone_lr=None,
           head_epochs=20, classes=CLASSES, workers=4, seed=0, **model_kw):
-    """lr 은 헤드(백본 외 전체) 학습률, backbone_lr 은 백본 인코더 학습률.
-    backbone_lr=None 이면 기존과 동일하게 백본도 헤드와 같은 학습률을 쓴다.
-    (freeze_stage 모델은 해제 시점부터 적용 — 그때 헤드는 기존대로 lr*0.3)
+    """학습률은 전 모델 공통 고정값: 헤드 1e-4 / 백본 인코더 1e-5.
+    (ScorerBase.default_lr / default_backbone_lr. lr·backbone_lr 인자로 덮어쓰기 가능)
+    freeze_stage 모델은 head_epochs 동안 백본 frozen + 헤드 lr, 해제 후 백본 그룹 추가.
 
     model_kw 는 해당 scorer 의 build_scorer 로 그대로 전달된다.
     예: train("bsnet", vertical_overlap=0.25), train("dorga", K=7, weights_path=...)"""
@@ -147,6 +147,8 @@ def train(model_name="bsnet", epochs=80, batch=8, lr=None, backbone_lr=None,
 
     scorer = build_scorer(model_name, classes=classes, **model_kw).to(device)
     lr = lr if lr is not None else scorer.default_lr
+    backbone_lr = (backbone_lr if backbone_lr is not None
+                   else scorer.default_backbone_lr)
     if scorer.needs_mask and not os.path.isdir(MASK_DIR):
         raise FileNotFoundError(f"마스크 폴더 없음: {MASK_DIR}. 먼저 cache_masks.py 실행.")
 
@@ -175,16 +177,10 @@ def train(model_name="bsnet", epochs=80, batch=8, lr=None, backbone_lr=None,
             if want_freeze != frozen:
                 scorer.freeze_backbone(want_freeze)
                 frozen = want_freeze
-                if want_freeze:
-                    # 백본 frozen -> 헤드 그룹만 생성됨
-                    optimizer = scorer.make_optimizer(lr)
-                    print(f"[stage] epoch {ep}: backbone_frozen=True, head_lr={lr}")
-                else:
-                    head_lr = lr * 0.3
-                    bb_lr = backbone_lr if backbone_lr is not None else head_lr
-                    optimizer = scorer.make_optimizer(head_lr, backbone_lr=bb_lr)
-                    print(f"[stage] epoch {ep}: backbone_frozen=False, "
-                          f"head_lr={head_lr}, backbone_lr={bb_lr}")
+                # frozen 이면 백본 그룹이 자동으로 빠져 헤드 그룹만 생성됨
+                optimizer = scorer.make_optimizer(lr, backbone_lr=backbone_lr)
+                print(f"[stage] epoch {ep}: backbone_frozen={want_freeze}, "
+                      f"head_lr={lr}, backbone_lr={backbone_lr}")
         elif optimizer is None:
             frozen = False
             optimizer = scorer.make_optimizer(lr, backbone_lr=backbone_lr)

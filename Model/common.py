@@ -84,7 +84,8 @@ class ScorerBase(nn.Module):
     name = "?"
     in_channels = 1
     needs_mask = False
-    default_lr = 1e-4
+    default_lr = 1e-4             # 헤드(백본 외 전체) 학습률. 전 모델 공통 고정값.
+    default_backbone_lr = 1e-5    # 백본 인코더 학습률. 전 모델 공통 고정값.
     freeze_stage = False
     optimizer_cls = torch.optim.Adam
 

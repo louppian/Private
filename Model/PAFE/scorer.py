@@ -28,8 +28,7 @@ class PAFEScorer(ScorerBase):
     name = "pafe"
     in_channels = 1                                  # 3ch 복제는 내부 처리
     needs_mask = False
-    default_lr = 1e-3
-    freeze_stage = True
+    freeze_stage = True           # lr 은 공통 고정값(헤드 1e-4 / 백본 1e-5) 상속
 
     def __init__(self, classes=CLASSES, kind="hybrid", backbone="resnet34",
                  weights_path=None):

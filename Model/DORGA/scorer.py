@@ -167,9 +167,8 @@ class DorgaScorer(ScorerBase):
     name = "dorga"
     in_channels = 1
     needs_mask = True
-    default_lr = 1e-4
-    freeze_stage = False                     # 원 루틴대로 전체 파라미터 동시 학습
-    optimizer_cls = torch.optim.AdamW
+    freeze_stage = False          # 원 루틴대로 전체 파라미터 동시 학습.
+    optimizer_cls = torch.optim.AdamW       # lr 은 공통 고정값(1e-4/1e-5) 상속
 
     def __init__(self, classes=CLASSES, K=7, weights_path=None):
         super().__init__()

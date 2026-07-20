@@ -25,8 +25,7 @@ class BSNetScorer(ScorerBase):
     name = "bsnet"
     in_channels = 1
     needs_mask = True
-    default_lr = 1e-3
-    freeze_stage = True
+    freeze_stage = True           # lr 은 공통 고정값(헤드 1e-4 / 백본 1e-5) 상속
 
     def __init__(self, classes=CLASSES, vertical_overlap=0.25,
                  pretrained_backbone=True):
