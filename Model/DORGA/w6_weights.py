@@ -1,35 +1,42 @@
 # -*- coding: utf-8 -*-
 r"""
-W6 — 방향별 3-seed DORGA 가중치 6개 저장 (자립 실행판)
+W6 — 방향별 3-seed 가중치 저장 (DORGA · BSNet · PAFE, 자립 실행판)
 
-2024→2026(fwd) / 2026→2024(rev) 를 seed 1·2·42 로 각각 학습하고, best_val
-체크포인트를 fwd1..3 / rev1..3 으로 모은다. 영역 순서 [RT, LT, RB, LB].
+각 모델을 2024→2026(fwd) / 2026→2024(rev) × seed 1·2·42 로 학습하고, best_val
+체크포인트를 fwd1..3 / rev1..3 으로 모은다. 영역 순서 전 모델 [RT, LT, RB, LB].
 
   fwd1 = 2024→2026 s1   fwd2 = 2024→2026 s2   fwd3 = 2024→2026 s42
   rev1 = 2026→2024 s1   rev2 = 2026→2024 s2   rev3 = 2026→2024 s42
 
-★ 자립판: npjDM2026 하네스(a1_common · dorga_train_2026to2024.py)에 의존하지
-  않는다. 학습 로직(dataset·loss·prior·split·cache·run_one)을 이 파일에 인라인했다.
-  DORGA 모델/백본/seg/stn 은 dorga 레포(REPO)에서 import (여긴 유지).
+저장 위치: weights/<model>/{fwd,rev}{1,2,3}.pth  (model = dorga|bsnet|pafe)
 
-★ 영역 순서 [RT, LT, RB, LB] — 원본 native [RT,RB,LT,LB] 를 데이터 레벨에서 재배열해
-  박았다(ROI 라벨 · split_lungs_to_four 박스 · REL_BOXES 폴백 일관). fresh 학습이라 안전.
+세 모델의 데이터 파이프라인(manifest · 2026 seg+STN 캐시 · cross-domain split)은
+공유하고, 모델별 학습만 갈라진다:
+  · DORGA — dorga 레포 + MRM.pth 백본, 5-손실·prior (기존 검증 파이프라인 그대로)
+  · BSNet — Private 통합 scorer(ResNet18 백본, 하드어텐션), BrixiaLoss
+  · PAFE  — Private 통합 scorer(ResNet34+ViT, 3ch 내부복제), CE
+
+★ 자립판: npjDM2026 하네스(a1_common · dorga_train_2026to2024.py)에 의존하지 않는다.
+  DORGA 모델/백본/seg/stn 은 dorga 레포(REPO)에서 import — 2026 캐시(seg+STN)를 만들려면
+  어느 모델을 돌리든 이 레포가 필요하다.
+
+★ 영역 순서 [RT, LT, RB, LB] — DORGA 는 native [RT,RB,LT,LB] 를 데이터 레벨에서 재배열해
+  박았고(라벨·박스·폴백 일관), BSNet/PAFE 의 Private scorer 는 애초에 이 순서로 출력한다.
 
 경로는 아래 CONFIG 상수 또는 환경변수로 지정한다(서버/로컬 이식용):
-  DORGA_REPO, W6_MANIFEST, W6_IMG2024, W6_MASK2024,
-  W6_SEG, W6_STN, W6_MRM, W6_OUT
+  DORGA_REPO, W6_MANIFEST, W6_IMG2024, W6_MASK2024, W6_SEG, W6_STN, W6_MRM, W6_OUT
 MRM 은 --mrm 로도 덮어쓸 수 있다.
 
 실행 (torch + GPU + dorga 레포):
-  python w6_weights.py                        # 6개 전부
-  python w6_weights.py --skip-existing         # 이미 있으면 그 arm 생략
-  python w6_weights.py --ckpt final            # final 체크포인트로 저장
-  python w6_weights.py --mrm /path/to/MRM.pth
-  python w6_weights.py --seeds 1 2 42 --epochs 50
+  python w6_weights.py                         # 3모델 × 6 arm 전부
+  python w6_weights.py --models bsnet pafe      # 일부 모델만
+  python w6_weights.py --skip-existing          # 이미 있는 arm 생략
+  python w6_weights.py --ckpt final --seeds 1 2 42 --epochs 50
 """
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import os
@@ -343,9 +350,10 @@ def make_split(df, mode, seed):
 
 
 # ═══════════════════════════════════════════════════════════
-# 한 arm 학습 (mode × seed) → run_dir 에 best_val/final 저장
+# DORGA arm 학습 (mode × seed) → run_dir 에 best_val/final 저장
+#   dorga 레포 모델 + MRM 백본 + 5-손실·prior (기존 검증 파이프라인)
 # ═══════════════════════════════════════════════════════════
-def run_one(mode, seed, epochs, cache2026, root, eval_test_every=1):
+def run_one_dorga(mode, seed, epochs, cache2026, root, eval_test_every=1):
     set_seed(seed)
     df = pd.read_csv(MANIFEST)
     df, TRAIN_Y, TEST_Y = make_split(df, mode, seed)
@@ -474,10 +482,196 @@ def run_one(mode, seed, epochs, cache2026, root, eval_test_every=1):
 
 
 # ═══════════════════════════════════════════════════════════
-# W6 드라이버 — 6 arm 학습 후 best_val 체크포인트 수집
+# BSNet / PAFE 용 공용 cross-domain 데이터셋
+#   (img, lung_mask, labels[RT,LT,RB,LB]) 를 낸다. DORGA 와 같은 소스/전처리.
+#   BSNet 은 lung_mask 로 하드어텐션, PAFE 는 mask 무시(내부 3ch 복제).
+# ═══════════════════════════════════════════════════════════
+class CrossDomainDataset(Dataset):
+    def __init__(self, df, cache2026, mode="train"):
+        self.df = df.reset_index(drop=True)
+        self.cache = cache2026
+        self.mode = mode
+        self.photo = transforms.Compose([transforms.ToTensor(),
+                                         transforms.Normalize([0.56], [0.17])])
+        self.rot = 10 if mode == "train" else 0
+
+    def __len__(self):
+        return len(self.df)
+
+    def _load(self, row):
+        if int(row["year"]) == 2024:
+            stem = Path(row["image_path"]).name
+            img = Image.open(IMG2024_DIR / stem).convert("L")
+            mask = np.array(Image.open(MASK2024_DIR / stem).convert("L"))
+        else:
+            img_u8, mask_u8 = self.cache[raw_path_from_npz(row["image_path"])]
+            img = Image.fromarray(img_u8); mask = mask_u8
+        return img, mask
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        img, mask_np = self._load(row)
+        mask = Image.fromarray(mask_np)
+        if img.size != (512, 512):
+            img = img.resize((512, 512), Image.BILINEAR)
+        if mask.size != (512, 512):
+            mask = mask.resize((512, 512), Image.NEAREST)
+        if self.mode == "train" and self.rot > 0:
+            ang = random.uniform(-self.rot, self.rot)
+            img = TF.rotate(img, ang, interpolation=TF.InterpolationMode.BILINEAR)
+            mask = TF.rotate(mask, ang, interpolation=TF.InterpolationMode.NEAREST)
+
+        x = self.photo(img)
+        if torch.isnan(x).any():
+            x = torch.zeros_like(x)
+        m = torch.from_numpy((np.array(mask) > 0).astype(np.float32))[None]   # (1,H,W)
+        y = torch.tensor([int(row[c]) for c in ROI], dtype=torch.long)        # [RT,LT,RB,LB]
+        return x, m, y
+
+
+@torch.no_grad()
+def evaluate_scorer(scorer, loader):
+    scorer.eval(); P, Y = [], []
+    for img, mask, y in loader:
+        img, mask = img.to(DEVICE), mask.to(DEVICE)
+        out = scorer(img, mask=mask)
+        P.append(out["logits"].argmax(-1).cpu()); Y.append(y)
+    P = torch.cat(P).numpy(); Y = torch.cat(Y).numpy()
+    acc = (P == Y).mean(); mae = np.abs(P - Y).mean(); bias = (P - Y).mean()
+    per = {ROI[i]: (float((P[:, i] == Y[:, i]).mean()), float(np.abs(P[:, i] - Y[:, i]).mean()),
+                    float((P[:, i] - Y[:, i]).mean())) for i in range(R)}
+    return acc, mae, bias, per, P, Y
+
+
+def load_private_scorer(name):
+    """Model/<Sub>/scorer.py 의 build_scorer 를 파일 경로로 로드 (이름 충돌 회피)."""
+    sub = {"bsnet": "BSNet", "pafe": "PAFE"}[name]
+    path = Path(__file__).resolve().parent.parent / sub / "scorer.py"   # Model/<Sub>/scorer.py
+    spec = importlib.util.spec_from_file_location(f"_scorer_{name}", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.build_scorer
+
+
+# ═══════════════════════════════════════════════════════════
+# BSNet / PAFE arm 학습 (Private ScorerBase 계약) → run_dir 저장
+#   freeze_stage: head_epochs 동안 백본 frozen(head lr) → 해제 후 backbone_lr 합류
+#   val MAE 로만 모델 선택(test 누수 없음), best_val/final 저장
+# ═══════════════════════════════════════════════════════════
+def run_one_scorer(name, mode, seed, epochs, cache2026, root,
+                   head_epochs=20, lr=None, backbone_lr=None, eval_test_every=1):
+    set_seed(seed)
+    df = pd.read_csv(MANIFEST)
+    df, TRAIN_Y, TEST_Y = make_split(df, mode, seed)
+
+    scorer = load_private_scorer(name)(classes=C).to(DEVICE)
+    lr = lr if lr is not None else scorer.default_lr
+    backbone_lr = backbone_lr if backbone_lr is not None else scorer.default_backbone_lr
+
+    print("\n" + "━" * 78)
+    print(f"▶ {name} arm: mode={mode} seed={seed} (train={TRAIN_Y} → test={TEST_Y}) "
+          f"lr={lr} backbone_lr={backbone_lr}")
+    for s in ("train", "val", "test"):
+        sub = df[df.split == s]
+        print(f"  [{s:<5}] {len(sub):>4}장 / {sub.patient.nunique():>3}명  "
+              f"평균등급 {sub[ROI].to_numpy().mean():.4f}")
+    print("━" * 78)
+
+    mk = lambda s, m: DataLoader(CrossDomainDataset(df[df.split == s], cache2026, m),
+                                 batch_size=BATCH_SIZE, shuffle=(m == "train"),
+                                 drop_last=(m == "train"), num_workers=0, pin_memory=True)
+    train_loader, val_loader, test_loader = mk("train", "train"), mk("val", "eval"), mk("test", "eval")
+    test_patients = df[df.split == "test"].patient.to_numpy()
+
+    run_dir = root / f"{mode}_s{seed}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    best_val, best_epoch, hist = float("inf"), -1, []
+    since_improve, optimizer, frozen = 0, None, None
+    for epoch in range(1, epochs + 1):
+        if scorer.freeze_stage:
+            want_freeze = epoch <= head_epochs
+            if want_freeze != frozen:
+                scorer.freeze_backbone(want_freeze)
+                frozen = want_freeze
+                optimizer = scorer.make_optimizer(lr, backbone_lr=backbone_lr)
+                print(f"  [stage] epoch {epoch}: backbone_frozen={want_freeze}")
+        elif optimizer is None:
+            frozen = False
+            optimizer = scorer.make_optimizer(lr, backbone_lr=backbone_lr)
+
+        scorer.train(True)
+        if frozen:
+            scorer.backbone_bn_eval()
+        for img, mask, y in tqdm(train_loader, desc=f"  [{epoch:03d}] train", leave=False):
+            img, mask, y = img.to(DEVICE), mask.to(DEVICE), y.to(DEVICE)
+            out = scorer(img, mask=mask, target=y)
+            loss, _ = scorer.compute_loss(out, y)
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+
+        v_acc, v_mae, v_bias, _, _, _ = evaluate_scorer(scorer, val_loader)
+        tag = ""
+        if v_mae < best_val:
+            best_val, best_epoch = v_mae, epoch
+            since_improve = 0
+            torch.save({"state_dict": scorer.net.state_dict(), "epoch": epoch,
+                        "best_val_mae": float(best_val)}, run_dir / "best_val_model.pth")
+            tag = "  << BEST(val)"
+        else:
+            since_improve += 1
+
+        do_test = (epoch % eval_test_every == 0) or (epoch > epochs - TAIL_EPOCHS) or (epoch == epochs)
+        if do_test:
+            t_acc, t_mae, t_bias, _, _, _ = evaluate_scorer(scorer, test_loader)
+            hist.append(dict(epoch=epoch, val_bias=float(v_bias), test_bias=float(t_bias),
+                             test_acc=float(t_acc), test_mae=float(t_mae)))
+            print(f"  [{epoch:03d}/{epochs}] val ACC {v_acc:.4f} MAE {v_mae:.4f} | "
+                  f"TEST({TEST_Y}) ACC {t_acc:.4f} MAE {t_mae:.4f} bias {t_bias:+.4f}{tag}")
+        else:
+            hist.append(dict(epoch=epoch, val_bias=float(v_bias)))
+            print(f"  [{epoch:03d}/{epochs}] val ACC {v_acc:.4f} MAE {v_mae:.4f}{tag}")
+
+        if EARLYSTOP_PATIENCE and since_improve >= EARLYSTOP_PATIENCE:
+            print(f"  ⏹ early stop @epoch {epoch} (best={best_epoch})")
+            break
+
+    torch.save({"state_dict": scorer.net.state_dict(), "epoch": epochs}, run_dir / "final_model.pth")
+
+    acc, mae, bias, per, P, Y = evaluate_scorer(scorer, test_loader)
+    tail = [h["test_bias"] for h in hist if "test_bias" in h][-TAIL_EPOCHS:]
+    bs = patient_bootstrap_ci(P, Y, test_patients, seed=seed)
+    res = dict(model=name, mode=mode, seed=seed, train_year=int(TRAIN_Y), test_year=int(TEST_Y),
+               roi_order=ROI, n_train=int((df.split == "train").sum()),
+               n_test=int((df.split == "test").sum()),
+               final_epoch=epochs, best_val_epoch=best_epoch, best_val_mae=float(best_val),
+               acc=float(acc), mae=float(mae), bias=float(bias),
+               tail_bias=float(np.mean(tail)) if tail else float("nan"),
+               pat_bias=bs["bias"], ci_lo=bs["ci"][0], ci_hi=bs["ci"][1],
+               per_roi={r: dict(acc=per[r][0], mae=per[r][1], bias=per[r][2]) for r in ROI})
+    (run_dir / "results.json").write_text(json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
+    (run_dir / "history.json").write_text(json.dumps(hist, indent=1), encoding="utf-8")
+    np.savez(run_dir / "test_preds.npz", preds=P, labels=Y, patients=test_patients)
+
+    print(f"  ✔ final bias {bias:+.4f} | best_val_mae {best_val:.4f}@ep{best_epoch}")
+    del scorer, train_loader, val_loader, test_loader
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+# ═══════════════════════════════════════════════════════════
+# W6 드라이버 — 모델 × 6 arm 학습 후 best_val 체크포인트 수집
 # ═══════════════════════════════════════════════════════════
 DEFAULT_SEEDS = [1, 2, 42]
+DEFAULT_MODELS = ["dorga", "bsnet", "pafe"]
 DIRECTIONS = [("2024to2026", "fwd"), ("2026to2024", "rev")]
+
+
+def train_arm(model, mode, seed, epochs, cache, stage_root):
+    """모델별 학습 디스패치. DORGA 는 dorga-repo 경로, BSNet/PAFE 는 Private scorer."""
+    if model == "dorga":
+        run_one_dorga(mode, seed, epochs, cache, stage_root)
+    else:
+        run_one_scorer(model, mode, seed, epochs, cache, stage_root)
 
 
 def _load_result(run_dir: Path) -> dict:
@@ -492,6 +686,8 @@ def _load_result(run_dir: Path) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--models", nargs="+", default=DEFAULT_MODELS,
+                    choices=DEFAULT_MODELS, help="학습할 모델 (기본 dorga bsnet pafe)")
     ap.add_argument("--seeds", type=int, nargs=3, default=DEFAULT_SEEDS,
                     help="번호 1,2,3 에 매핑될 seed 3개 (기본 1 2 42)")
     ap.add_argument("--epochs", type=int, default=50)
@@ -507,60 +703,68 @@ def main():
     if args.mrm:
         MRM_W = Path(args.mrm)
 
-    weights_dir = OUT_ROOT / "weights"
-    stage_root = OUT_ROOT / "runs"
-    weights_dir.mkdir(parents=True, exist_ok=True)
-    stage_root.mkdir(parents=True, exist_ok=True)
+    weights_root = OUT_ROOT / "weights"
+    runs_root = OUT_ROOT / "runs"
+    weights_root.mkdir(parents=True, exist_ok=True)
     ckpt_file = f"{args.ckpt}_model.pth"
-    print(f"[config] ROI={ROI}  MRM={MRM_W}  OUT={OUT_ROOT.resolve()}")
+    print(f"[config] models={args.models}  ROI={ROI}  MRM={MRM_W}  OUT={OUT_ROOT.resolve()}")
 
     cache = None
     manifest = {}
-    for mode, prefix in DIRECTIONS:
-        for idx, seed in enumerate(args.seeds, start=1):
-            name = f"{prefix}{idx}"
-            dst = weights_dir / f"{name}.pth"
-            run_dir = stage_root / f"{mode}_s{seed}"
+    for model in args.models:
+        weights_dir = weights_root / model            # weights/<model>/
+        stage_root = runs_root / model                # runs/<model>/
+        weights_dir.mkdir(parents=True, exist_ok=True)
+        stage_root.mkdir(parents=True, exist_ok=True)
 
-            if args.skip_existing and dst.exists():
-                print(f"[skip] {name} (이미 존재)")
-                manifest[name] = {"file": dst.name, "mode": mode, "seed": seed,
-                                  "direction": prefix, "ckpt": args.ckpt, "roi_order": ROI,
-                                  "mrm": str(MRM_W), "skipped": True, **_load_result(run_dir)}
-                continue
+        for mode, prefix in DIRECTIONS:
+            for idx, seed in enumerate(args.seeds, start=1):
+                name = f"{prefix}{idx}"               # fwd1 … rev3
+                key = f"{model}/{name}"
+                dst = weights_dir / f"{name}.pth"
+                run_dir = stage_root / f"{mode}_s{seed}"
+                meta = {"file": f"{model}/{name}.pth", "model": model, "mode": mode,
+                        "seed": seed, "direction": prefix, "ckpt": args.ckpt, "roi_order": ROI}
+                if model == "dorga":
+                    meta["mrm"] = str(MRM_W)
 
-            if cache is None:
-                print("[cache] 2026 영상 캐시 빌드 중…")
-                cache = build_full_2026_cache()
+                if args.skip_existing and dst.exists():
+                    print(f"[skip] {key} (이미 존재)")
+                    manifest[key] = {**meta, "skipped": True, **_load_result(run_dir)}
+                    continue
 
-            print("\n" + "=" * 78)
-            print(f"[train] {name}  mode={mode}  seed={seed}  (epochs={args.epochs}, ckpt={args.ckpt})")
-            print("=" * 78)
-            run_one(mode, seed, args.epochs, cache, stage_root)
+                if cache is None:                     # 2026 캐시는 모든 모델/arm 공유
+                    print("[cache] 2026 영상 캐시 빌드 중…")
+                    cache = build_full_2026_cache()
 
-            src = run_dir / ckpt_file
-            if not src.exists():
-                raise FileNotFoundError(f"{src} 없음. run_one 이 {ckpt_file} 을 저장하지 못했다.")
-            shutil.copy2(src, dst)
-            print(f"[save] {src.name} → weights/{dst.name}")
-            manifest[name] = {"file": dst.name, "mode": mode, "seed": seed,
-                              "direction": prefix, "ckpt": args.ckpt, "roi_order": ROI,
-                              "mrm": str(MRM_W), "skipped": False, **_load_result(run_dir)}
+                print("\n" + "=" * 78)
+                print(f"[train] {key}  mode={mode}  seed={seed}  "
+                      f"(epochs={args.epochs}, ckpt={args.ckpt})")
+                print("=" * 78)
+                train_arm(model, mode, seed, args.epochs, cache, stage_root)
 
-            if not args.keep_staging:
-                for f in run_dir.glob("*.pth"):
-                    f.unlink()
+                src = run_dir / ckpt_file
+                if not src.exists():
+                    raise FileNotFoundError(f"{src} 없음. {ckpt_file} 저장 실패.")
+                shutil.copy2(src, dst)
+                print(f"[save] {src.name} → weights/{model}/{dst.name}")
+                manifest[key] = {**meta, "skipped": False, **_load_result(run_dir)}
 
-    (weights_dir / "manifest.json").write_text(
+                if not args.keep_staging:
+                    for f in run_dir.glob("*.pth"):
+                        f.unlink()
+
+    (weights_root / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print("\n" + "=" * 78)
     print(f"완료 — weights/ 에 {len(manifest)}개 매핑  (순서 {ROI})")
-    for name, m in manifest.items():
+    for key, m in manifest.items():
         vm = m.get("best_val_mae")
         vm = f"{vm:.4f}" if isinstance(vm, (int, float)) else "?"
-        print(f"  {name}.pth  ←  {m['mode']} s{m['seed']}  (val_mae {vm}, best@ep {m.get('best_val_epoch')})")
-    print(f"  manifest: {weights_dir / 'manifest.json'}")
+        print(f"  {key}.pth  ←  {m['mode']} s{m['seed']}  "
+              f"(val_mae {vm}, best@ep {m.get('best_val_epoch')})")
+    print(f"  manifest: {weights_root / 'manifest.json'}")
 
 
 if __name__ == "__main__":
