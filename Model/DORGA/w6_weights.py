@@ -83,7 +83,7 @@ R, C, K      = 4, 5, 7
 PROJ_DIM     = 768
 BATCH_SIZE   = 32
 FREEZE_BLOCKS = 0          # 동결 없음 — 백본 전체 학습(1e-5) + 헤드(1e-4)
-VAL_FRAC     = 0.15
+VAL_FRAC     = 0.10          # train:val = 9:1
 TAIL_EPOCHS  = 5
 EARLYSTOP_PATIENCE = 10
 NORM_MEAN, NORM_STD = [0.56], [0.17]
@@ -474,7 +474,6 @@ def run_one_dorga(mode, seed, epochs, root, eval_test_every=1):
             print(f"  ⏹ early stop @epoch {epoch} (best={best_epoch})")
             break
 
-    torch.save({"state_dict": model.state_dict(), "epoch": epochs}, run_dir / "final_model.pth")
     acc, mae, bias, per, P, Y = evaluate_dorga(model, test_loader)
     _write_results(run_dir, "dorga", mode, seed, TRAIN_Y, TEST_Y, df, epochs, best_epoch,
                    best_val, acc, mae, bias, per, hist, P, Y, test_patients, seed)
@@ -522,6 +521,7 @@ def run_one_scorer(name, mode, seed, epochs, root, eval_test_every=1):
 
     # freeze 없음 — 처음부터 백본(1e-5)+헤드(1e-4) 함께 학습
     optimizer = scorer.make_optimizer(lr, backbone_lr=backbone_lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     best_val, best_epoch, hist, since = float("inf"), -1, [], 0
     for epoch in range(1, epochs + 1):
         scorer.train(True)
@@ -532,6 +532,7 @@ def run_one_scorer(name, mode, seed, epochs, root, eval_test_every=1):
             loss, _ = scorer.compute_loss(out, y)
             optimizer.zero_grad(); loss.backward(); optimizer.step()
             tr_P.append(out["logits"].detach().argmax(-1).cpu()); tr_Y.append(y.detach().cpu())
+        scheduler.step()
 
         tr_P, tr_Y = torch.cat(tr_P).numpy(), torch.cat(tr_Y).numpy()
         tr_acc, tr_bias = (tr_P == tr_Y).mean(), (tr_P - tr_Y).mean()
@@ -562,7 +563,6 @@ def run_one_scorer(name, mode, seed, epochs, root, eval_test_every=1):
             print(f"  ⏹ early stop @epoch {epoch} (best={best_epoch})")
             break
 
-    torch.save({"state_dict": scorer.net.state_dict(), "epoch": epochs}, run_dir / "final_model.pth")
     acc, mae, bias, per, P, Y = evaluate_scorer(scorer, test_loader)
     _write_results(run_dir, name, mode, seed, TRAIN_Y, TEST_Y, df, epochs, best_epoch,
                    best_val, acc, mae, bias, per, hist, P, Y, test_patients, seed)
@@ -618,7 +618,6 @@ def main():
     ap.add_argument("--models", nargs="+", default=DEFAULT_MODELS, choices=DEFAULT_MODELS)
     ap.add_argument("--seeds", type=int, nargs=3, default=DEFAULT_SEEDS)
     ap.add_argument("--epochs", type=int, default=50)
-    ap.add_argument("--ckpt", choices=["best_val", "final"], default="best_val")
     ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--keep-staging", action="store_true")
     ap.add_argument("--mrm", default=None, help="DORGA 백본(MRM) 경로 (기본 CONFIG)")
@@ -631,7 +630,7 @@ def main():
     weights_root = OUT_ROOT / "weights"
     runs_root = OUT_ROOT / "runs"
     weights_root.mkdir(parents=True, exist_ok=True)
-    ckpt_file = f"{args.ckpt}_model.pth"
+    ckpt_file = "best_val_model.pth"          # best val-MAE 가중치 하나만 저장
     print(f"[config] models={args.models} ROI={ROI} IMG={IMG_DIR} MRM={MRM_W} OUT={OUT_ROOT}")
 
     manifest = {}
@@ -647,13 +646,13 @@ def main():
                 dst = weights_dir / f"{name}.pth"
                 run_dir = stage_root / f"{mode}_s{seed}"
                 meta = {"file": f"{model}/{name}.pth", "model": model, "mode": mode,
-                        "seed": seed, "direction": prefix, "ckpt": args.ckpt, "roi_order": ROI}
+                        "seed": seed, "direction": prefix, "ckpt": "best_val", "roi_order": ROI}
                 if args.skip_existing and dst.exists():
                     print(f"[skip] {key} (이미 존재)")
                     manifest[key] = {**meta, "skipped": True, **_load_result(run_dir)}
                     continue
                 print("\n" + "=" * 78)
-                print(f"[train] {key}  mode={mode} seed={seed} (epochs={args.epochs}, ckpt={args.ckpt})")
+                print(f"[train] {key}  mode={mode} seed={seed} (epochs={args.epochs}, best_val)")
                 print("=" * 78)
                 train_arm(model, mode, seed, args.epochs, stage_root)
                 src = run_dir / ckpt_file
