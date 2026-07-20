@@ -78,13 +78,18 @@ from scorer import (                                                 # noqa: E40
 )
 # seg+STN(2026 캐시)은 Model/SegSTN/pipeline.py 의 PreprocessPipeline 을 build_2026_cache 에서 로드.
 
-MANIFEST     = os.environ.get("W6_MANIFEST", r"D:\InhaUH_CXR\2026.05 CXRs\split_manifest.csv")
-IMG2024_DIR  = Path(os.environ.get("W6_IMG2024",  r"D:\MICCAI2026\inhauh\image_normalize"))
-MASK2024_DIR = Path(os.environ.get("W6_MASK2024", r"D:\MICCAI2026\inhauh\mask_normalize"))
-SEG_W        = Path(os.environ.get("W6_SEG", "seg_weights.pt"))       # 서버 경로로 지정
-STN_W        = Path(os.environ.get("W6_STN", "stn_weights.pth"))      # 서버 경로로 지정
-MRM_W        = Path(os.environ.get("W6_MRM", "/shared/home/mai/JeongGeon/MICCAI2026/MRM.pth"))
-OUT_ROOT     = Path(os.environ.get("W6_OUT", "./w6_out"))
+# ═══════════════ 경로 — 서버 기준. 여기만 맞게 수정하면 됨 ═══════════════
+BASE         = "/shared/home/mai/JeongGeon"
+# ↓ 데이터 경로 (cross-domain manifest + 2024 정렬 이미지/마스크). 서버 실경로로 확인·수정.
+MANIFEST     = f"{BASE}/MICCAI2026/inhauh/split_manifest.csv"     # 열: patient, year, image_path, RT,RB,LT,LB
+IMG2024_DIR  = Path(f"{BASE}/MICCAI2026/inhauh/image_normalize")  # 2024 정렬 이미지
+MASK2024_DIR = Path(f"{BASE}/MICCAI2026/inhauh/mask_normalize")   # 2024 정렬 마스크
+# ↓ 가중치 (seg/stn 은 Private SegSTN, MRM 은 지정 경로) — 확인된 서버 경로
+SEG_W        = Path(f"{BASE}/Private/Model/SegSTN/weights/finetuned_9601.pt")
+STN_W        = Path(f"{BASE}/Private/Model/SegSTN/weights/stn_weights.pth")
+MRM_W        = Path(f"{BASE}/MICCAI2026/MRM.pth")
+# ↓ 산출물 (가중치·로그)
+OUT_ROOT     = Path(f"{BASE}/Private/w6_out")
 
 # 영역 순서 [RT, LT, RB, LB] (display). 라벨·박스·폴백 모두 이 순서로 일관.
 ROI          = ["RT", "LT", "RB", "LB"]
