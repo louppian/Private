@@ -16,15 +16,17 @@ W6 — 방향별 3-seed 가중치 저장 (DORGA · BSNet · PAFE, 자립 실행�
   · BSNet — Private 통합 scorer(ResNet18 백본, 하드어텐션), BrixiaLoss
   · PAFE  — Private 통합 scorer(ResNet34+ViT, 3ch 내부복제), CE
 
-★ 자립판: npjDM2026 하네스(a1_common · dorga_train_2026to2024.py)에 의존하지 않는다.
-  DORGA 모델/백본/seg/stn 은 dorga 레포(REPO)에서 import — 2026 캐시(seg+STN)를 만들려면
-  어느 모델을 돌리든 이 레포가 필요하다.
+★ 완전 자립: 외부 dorga 패키지(C:\Code\DORGA) 의존 없음. 전부 Private repo + timm 로 해결.
+  · DORGA 모델·손실 → Model/DORGA/{DORGA.py, scorer.py}
+  · DORGA 백본 → timm ViT + MRM 체크포인트 vit. 키 로드(load_mrm_vit, 인라인)
+  · 2026 seg+STN 캐시 → Model/SegSTN/pipeline.py (PreprocessPipeline)
+  npjDM2026 하네스(a1_common · dorga_train_2026to2024.py)에도 의존하지 않는다.
 
 ★ 영역 순서 [RT, LT, RB, LB] — DORGA 는 native [RT,RB,LT,LB] 를 데이터 레벨에서 재배열해
   박았고(라벨·박스·폴백 일관), BSNet/PAFE 의 Private scorer 는 애초에 이 순서로 출력한다.
 
 경로는 아래 CONFIG 상수 또는 환경변수로 지정한다(서버/로컬 이식용):
-  DORGA_REPO, W6_MANIFEST, W6_IMG2024, W6_MASK2024, W6_SEG, W6_STN, W6_MRM, W6_OUT
+  W6_MANIFEST, W6_IMG2024, W6_MASK2024, W6_SEG, W6_STN, W6_MRM, W6_OUT
 MRM 은 --mrm 로도 덮어쓸 수 있다.
 
 실행 (torch + GPU + dorga 레포):
@@ -62,26 +64,25 @@ from tqdm import tqdm
 # ═══════════════════════════════════════════════════════════
 # CONFIG — 경로/하이퍼파라미터 (환경변수 우선, 없으면 기본값)
 # ═══════════════════════════════════════════════════════════
-REPO = os.environ.get("DORGA_REPO", r"C:\Code\DORGA")     # dorga 레포 (모델·seg·stn)
-if REPO not in sys.path:
-    sys.path.insert(0, REPO)
+# ── DORGA 모델·손실: Private repo 자립 코드 (C:\Code\DORGA 패키지 불필요) ──
+_HERE = os.path.dirname(os.path.abspath(__file__))          # Model/DORGA
+_MODEL_ROOT = os.path.dirname(_HERE)                         # Model
+for _p in (_HERE, _MODEL_ROOT):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-from dorga.models.backbone import load_mae_ckpt_to_512               # noqa: E402
-from dorga.models.dorga_model import BrixiaViT512Dynamic            # noqa: E402
-from dorga.models.pattern_prior import pattern_loss                 # noqa: E402
-from dorga.losses.losses import (                                   # noqa: E402
+from DORGA import BrixiaViT512Dynamic, vit_base_patch16_512          # noqa: E402  모델·ViT 팩토리
+from scorer import (                                                 # noqa: E402  손실 (Model/DORGA/scorer.py)
     compute_alpha_oracle, kl_attention_loss,
-    loss_function, loss_function_projection,
+    loss_function, loss_function_projection, pattern_loss,
 )
-from dorga.utils.training import _make_optimizer, _set_trainable    # noqa: E402
-from dorga.preprocessing.segmentation import LungSegmenter          # noqa: E402
-from dorga.preprocessing.alignment import SpatialAligner            # noqa: E402
+# seg+STN(2026 캐시)은 Model/SegSTN/pipeline.py 의 PreprocessPipeline 을 build_2026_cache 에서 로드.
 
 MANIFEST     = os.environ.get("W6_MANIFEST", r"D:\InhaUH_CXR\2026.05 CXRs\split_manifest.csv")
 IMG2024_DIR  = Path(os.environ.get("W6_IMG2024",  r"D:\MICCAI2026\inhauh\image_normalize"))
 MASK2024_DIR = Path(os.environ.get("W6_MASK2024", r"D:\MICCAI2026\inhauh\mask_normalize"))
-SEG_W        = Path(os.environ.get("W6_SEG", str(Path(REPO) / "assets/weights/seg_weights.pt")))
-STN_W        = Path(os.environ.get("W6_STN", str(Path(REPO) / "assets/weights/stn_weights.pth")))
+SEG_W        = Path(os.environ.get("W6_SEG", "seg_weights.pt"))       # 서버 경로로 지정
+STN_W        = Path(os.environ.get("W6_STN", "stn_weights.pth"))      # 서버 경로로 지정
 MRM_W        = Path(os.environ.get("W6_MRM", "/shared/home/mai/JeongGeon/MICCAI2026/MRM.pth"))
 OUT_ROOT     = Path(os.environ.get("W6_OUT", "./w6_out"))
 
@@ -111,6 +112,43 @@ def set_seed(s):
     torch.backends.cudnn.deterministic = True; torch.backends.cudnn.benchmark = False
 
 
+# ── DORGA 백본 로더 (dorga_inhauh_full.py line 756-768 방식, 통짜/인라인) ──
+def load_mrm_vit(mrm_path, num_classes=C, in_chans=1):
+    """timm ViT 생성 후 체크포인트의 vit. 키를 로드. C:\\Code\\DORGA 불필요."""
+    vit = vit_base_patch16_512(num_classes=num_classes, in_chans=in_chans,
+                               drop_path_rate=0.1, global_pool="avg")
+    ck = torch.load(str(mrm_path), map_location="cpu", weights_only=False)
+    sd = ck["state_dict"] if isinstance(ck, dict) and "state_dict" in ck else ck
+    vit_sd = {k.replace("vit.", ""): v for k, v in sd.items() if k.startswith("vit.")}
+    if not vit_sd:                       # vit. 접두어 없는 순수 ViT 체크포인트인 경우
+        vit_sd = dict(sd)
+    vit_sd.pop("head.weight", None); vit_sd.pop("head.bias", None)
+    m, u = vit.load_state_dict(vit_sd, strict=False)
+    print(f"[backbone] MRM({Path(mrm_path).name}) loaded: missing={len(m)} unexpected={len(u)}")
+    return vit
+
+
+# ── freeze / optimizer (dorga_inhauh_full.py set_trainable/make_optimizer 이식) ──
+def _set_trainable(model, freeze_blocks=FREEZE_BLOCKS):
+    for p in model.parameters():
+        p.requires_grad = True
+    for blk in model.vit.blocks[:freeze_blocks]:
+        for p in blk.parameters():
+            p.requires_grad = False
+
+
+def _make_optimizer(model, enc_lr=1e-5, head_lr=1e-4):
+    """encoder(vit.) 와 헤드 분리 lr. 공통 규약(헤드 1e-4 / 백본 1e-5)."""
+    enc = [p for n, p in model.named_parameters() if n.startswith("vit.") and p.requires_grad]
+    head = [p for n, p in model.named_parameters() if not n.startswith("vit.") and p.requires_grad]
+    groups = []
+    if enc:
+        groups.append({"params": enc, "lr": enc_lr, "weight_decay": 5e-5})
+    if head:
+        groups.append({"params": head, "lr": head_lr, "weight_decay": 5e-4})
+    return torch.optim.AdamW(groups)
+
+
 # ═══════════════════════════════════════════════════════════
 # 2026 in-code 전처리 (seg + STN align) — 저장 없이 RAM 캐시
 # ═══════════════════════════════════════════════════════════
@@ -121,25 +159,29 @@ def raw_path_from_npz(npz_path: str) -> str:
     return os.path.join(d, "RAW_IMAGE", raw)
 
 
+def _load_preprocess_pipeline():
+    """Model/SegSTN/pipeline.py 의 PreprocessPipeline 을 파일 경로로 로드 (이름 충돌 회피)."""
+    path = os.path.join(_MODEL_ROOT, "SegSTN", "pipeline.py")
+    spec = importlib.util.spec_from_file_location("_segstn_pipeline", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)                         # pipeline.py 가 seg/stn 을 자체 경로로 import
+    return mod.PreprocessPipeline
+
+
 @torch.no_grad()
 def build_2026_cache(raw_paths):
-    from dorga.models.stn import STN
-    seg = LungSegmenter(str(SEG_W), device=str(DEVICE))
-    aln = SpatialAligner(str(STN_W), device=str(DEVICE))
+    """RAW → Private SegSTN(GUNet seg + STN align) → 정렬 512 img + mask 캐시."""
+    PreprocessPipeline = _load_preprocess_pipeline()
+    pipe = PreprocessPipeline(str(SEG_W), str(STN_W), device=str(DEVICE))
     cache = {}
-    for p in tqdm(raw_paths, desc="2026 seg+align (in-code)"):
+    for p in tqdm(raw_paths, desc="2026 seg+align (Private SegSTN)"):
         arr = np.array(Image.open(p).convert("L")).astype(np.float32) / 255.0
-        t = torch.from_numpy(arr)[None, None]
-        im1024 = F.interpolate(t, size=(1024, 1024), mode="bilinear", align_corners=False)
-        im512  = F.interpolate(t, size=(512, 512), mode="bilinear", align_corners=False).to(DEVICE)
-        mask1024 = seg(im1024.to(DEVICE))
-        mask512  = F.interpolate(mask1024.float(), size=(512, 512), mode="nearest").to(DEVICE)
-        theta = aln.stn(mask512)
-        aligned_img  = STN.transform(im512, theta).cpu()
-        aligned_mask = STN.transform(mask512, theta).cpu()
-        cache[p] = ((aligned_img[0, 0].numpy() * 255).clip(0, 255).astype(np.uint8),
-                    ((aligned_mask[0, 0].numpy() > 0.5) * 255).astype(np.uint8))
-    del seg, aln
+        t = torch.from_numpy(arr)[None, None]           # [1,1,H,W]
+        aligned, masks = pipe(t)                         # aligned [1,1,512,512], masks [1,1,1024,1024] (cpu)
+        mask512 = F.interpolate(masks.float(), size=(512, 512), mode="nearest")[0, 0].numpy()
+        cache[p] = ((aligned[0, 0].numpy() * 255).clip(0, 255).astype(np.uint8),
+                    ((mask512 > 0.5) * 255).astype(np.uint8))
+    del pipe
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     return cache
@@ -381,8 +423,7 @@ def run_one_dorga(mode, seed, epochs, cache2026, root, eval_test_every=1):
     train_loader, val_loader, test_loader = mk("train", "train"), mk("val", "eval"), mk("test", "eval")
     test_patients = df[df.split == "test"].patient.to_numpy()
 
-    vit = load_mae_ckpt_to_512(str(MRM_W), num_classes=C, in_chans=1,
-                               drop_path_rate=0.1, verbose=False)
+    vit = load_mrm_vit(MRM_W, num_classes=C, in_chans=1)
     model = BrixiaViT512Dynamic(vit, num_regions=R, num_classes=C, num_patterns=K,
                                 proj_dim=PROJ_DIM, pi_global=pi_g, pi_patterns=pi_p,
                                 gnn_num_heads=4, gnn_dropout=0.1).to(DEVICE)
