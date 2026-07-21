@@ -52,14 +52,15 @@ from torchvision import transforms
 from tqdm import tqdm
 
 # ── DORGA 모델·손실: Private repo 자립 코드 ──
-_HERE = os.path.dirname(os.path.abspath(__file__))          # Model/DORGA
-_MODEL_ROOT = os.path.dirname(_HERE)                        # Model
-for _p in (_HERE, _MODEL_ROOT):
+_HERE = os.path.dirname(os.path.abspath(__file__))          # Model
+_MODEL_ROOT = _HERE                                         # Model (BSNet/PAFE scorer 경로 기준)
+_DORGA_DIR = os.path.join(_HERE, "DORGA")                   # Model/DORGA (DORGA.py·scorer.py)
+for _p in (_MODEL_ROOT, _DORGA_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from DORGA import BrixiaViT512Dynamic, vit_base_patch16_512          # noqa: E402
-from scorer import (                                                # noqa: E402  손실
+from DORGA import BrixiaViT512Dynamic, vit_base_patch16_512          # noqa: E402  Model/DORGA/DORGA.py
+from scorer import (                                                # noqa: E402  Model/DORGA/scorer.py 손실
     compute_alpha_oracle, kl_attention_loss,
     loss_function, loss_function_projection, pattern_loss,
 )
