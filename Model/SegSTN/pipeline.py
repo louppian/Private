@@ -13,7 +13,8 @@ pipeline.py — GUNet 폐분할 + STN 정렬 정규화 파이프라인 & 폴더 
 
 저장 대상 = STN 정렬된 512×512 grayscale uint8 png.
   * photometric Normalize([0.56],[0.17])는 학습 로더에서 적용 → 여기서 저장하지 않는다.
-  * lung mask는 --save-mask 로 별도 저장(다운스트림 4-ROI split 용).
+  * lung mask는 --save-mask 로 별도 저장(정렬 이미지와 같은 STN 좌표계, 다운스트림 4-ROI split 용).
+    기본 저장 폴더 = CXR/Merged/masks (train.py MASK_DIR 와 동일).
 
 사용법
     python pipeline.py                      # DRY-RUN(기본): 개수·매핑·skip만 출력
@@ -49,6 +50,7 @@ SEG_W = "/shared/home/mai/JeongGeon/Private/Model/SegSTN/weights/finetuned_9601.
 STN_W = "/shared/home/mai/JeongGeon/Private/Model/SegSTN/weights/stn_weights.pth"
 SRC   = "/shared/home/mai/JeongGeon/Private/CXR/Merged/images_original"
 DST   = "/shared/home/mai/JeongGeon/Private/CXR/Merged/images_normalize"
+MASK  = "/shared/home/mai/JeongGeon/Private/CXR/Merged/masks"   # train.py MASK_DIR 와 동일
 
 EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
@@ -68,17 +70,30 @@ class PreprocessPipeline(nn.Module):
 
     @torch.no_grad()
     def forward(self, images: torch.Tensor):
-        """images: [B,1,H,W] float[0,1] → (aligned[B,1,512,512] cpu, mask[B,1,1024,1024] cpu)."""
+        """images: [B,1,H,W] float[0,1] → (aligned_img[B,1,512,512], aligned_mask[B,1,512,512]) cpu.
+
+        이미지와 마스크에 '동일한' affine grid 를 적용해 둘을 같은 좌표계로 정렬한다.
+        (과거 버그: 이미지에만 theta 를 적용하고 정렬 전 원본 좌표계 마스크를 반환 →
+         images_normalize(정렬 좌표계)와 mask(원본 좌표계)가 어긋나 4-ROI 오버레이가
+         폐 위치와 불일치했다. 반환 마스크는 이제 이미지와 같은 정렬 좌표계의 binary.)
+        """
         images = images.float()
         images_1024 = F.interpolate(images, size=(1024, 1024), mode="bilinear", align_corners=False)
-        images_512 = F.interpolate(images, size=(512, 512), mode="bilinear", align_corners=False)
+        images_512 = F.interpolate(images, size=(512, 512), mode="bilinear",
+                                   align_corners=False).to(self.device)
 
-        masks = self.segmenter(images_1024)                         # [B,1,1024,1024] cpu {0,1}
+        masks_1024 = self.segmenter(images_1024)                    # [B,1,1024,1024] cpu {0,1} · 원본 좌표계
+        mask_512 = F.interpolate(masks_1024.float(), size=(512, 512),
+                                 mode="nearest").to(self.device)
 
-        mask512 = F.interpolate(masks.float(), size=(512, 512), mode="nearest").to(self.device)
-        theta = self.stn(mask512)                                   # 마스크로 affine 추정
-        aligned = STN.transform(images_512.to(self.device), theta)  # 같은 theta를 이미지에 적용
-        return aligned.cpu(), masks
+        theta = self.stn(mask_512)                                  # 마스크로 affine 추정
+        grid = F.affine_grid(theta, images_512.size(), align_corners=False)   # 이미지·마스크 공용 grid
+
+        aligned_img = F.grid_sample(images_512, grid, mode="bilinear",
+                                    padding_mode="zeros", align_corners=False)
+        aligned_mask = F.grid_sample(mask_512, grid, mode="nearest",
+                                     padding_mode="zeros", align_corners=False) > 0.5
+        return aligned_img.cpu(), aligned_mask.cpu()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -104,13 +119,13 @@ def main():
     ap.add_argument("--dst", default=DST)
     ap.add_argument("--seg", default=SEG_W)
     ap.add_argument("--stn", default=STN_W)
-    ap.add_argument("--mask-dst", default=None, help="마스크 저장 폴더(기본: dst 옆 masks_normalize)")
+    ap.add_argument("--mask-dst", default=MASK, help="마스크 저장 폴더(기본: CXR/Merged/masks = train.py MASK_DIR)")
     ap.add_argument("--save-mask", action="store_true")
     ap.add_argument("--overwrite", action="store_true", help="기존 출력도 덮어씀(기본: skip)")
     ap.add_argument("--execute", action="store_true", help="미지정 시 DRY-RUN")
     args = ap.parse_args()
 
-    mask_dst = args.mask_dst or os.path.join(os.path.dirname(args.dst.rstrip("/\\")), "masks_normalize")
+    mask_dst = args.mask_dst
 
     def dst_of(src_path, base):
         rel = os.path.relpath(src_path, args.src)
@@ -125,7 +140,17 @@ def main():
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
     files = list_images(args.src)
-    todo = files if args.overwrite else [f for f in files if not os.path.exists(dst_of(f, args.dst))]
+
+    def needs_processing(f):
+        if args.overwrite:
+            return True
+        if not os.path.exists(dst_of(f, args.dst)):            # 정규화 이미지 없음
+            return True
+        if args.save_mask and not os.path.exists(dst_of(f, mask_dst)):  # 마스크만 없음
+            return True
+        return False
+
+    todo = [f for f in files if needs_processing(f)]
     print(f"=== normalize ({'EXECUTE' if args.execute else 'DRY-RUN'}) · device={dev} ===")
     print(f"  src={args.src}\n  dst={args.dst}")
     print(f"  입력 {len(files)}장 · 변환대상 {len(todo)}장 · skip {len(files)-len(todo)}"
@@ -142,7 +167,7 @@ def main():
     failed = []
     for f in tqdm(todo, desc="seg+align"):
         try:
-            aligned, masks = pipe(load_gray_tensor(f))
+            aligned, aligned_mask = pipe(load_gray_tensor(f))
             out = dst_of(f, args.dst)
             os.makedirs(os.path.dirname(out), exist_ok=True)
             im = (aligned[0, 0].numpy() * 255).clip(0, 255).astype(np.uint8)
@@ -150,7 +175,7 @@ def main():
             if args.save_mask:
                 mout = dst_of(f, mask_dst)
                 os.makedirs(os.path.dirname(mout), exist_ok=True)
-                mk = F.interpolate(masks.float(), size=(512, 512), mode="nearest")[0, 0].numpy() > 0.5
+                mk = aligned_mask[0, 0].numpy()                # 이미지와 동일 좌표계(정렬됨), resize 금지
                 Image.fromarray((mk * 255).astype(np.uint8)).save(mout)
         except Exception as e:                       # seg 실패 등은 기록하고 계속
             failed.append(f"{f}\t{type(e).__name__}: {e}")
