@@ -2,7 +2,7 @@
 r"""
 check_value_a.py — A1 최종 판정값이 draft md(§5.3)와 일치하는지 검증.
 
-  δ_obs   (§4.4 표4)  : RB +0.198, LT +0.138           ← E0 npz 또는 verdict
+  δ_obs   (§4.4 표4)  : RB +0.198, LT +0.138           ← E1 npz 또는 verdict
   Δγ 정합 (§5.2)      : RB −0.102                        ← A1_verdict.json
   δ_corr  (§5.3 표)   : δ_obs + Δγ/2. RB +0.147[+0.029,+0.263](CI 0 배제),
                          LT +0.064(CI 0 포함). CI 0 배제 ROI = RB 뿐.
@@ -21,7 +21,7 @@ for _s in (sys.stdout, sys.stderr):
 REPO = Path(__file__).resolve().parent
 CKPT = REPO / "checkpoint"
 ROI = ["RT", "LT", "RB", "LB"]
-RUNS = CKPT / "E" / "runs" / "dorga"
+RUNS = CKPT / "E1" / "runs" / "dorga"
 
 REF_DOBS = {"RB": +0.198, "LT": +0.138}                        # §4.4 표4
 REF_DCORR = {"RB": +0.147, "LT": +0.064}                       # §5.3 표
@@ -45,7 +45,7 @@ def check_dobs(rec, tol):
     print("\n" + "=" * 76); print("[δ_obs] 방향반전 관측 라벨성분 (§4.4 표4)"); print("=" * 76)
     fok = all(pooled_bias(m, "RB") is not None for m in ("2024to2026", "2026to2024"))
     if not fok:
-        print("  [SKIP] E0 npz 없음 — python Experiment/E/e0_cross.py --seeds 42 1 2"); return
+        print("  [SKIP] E1 npz 없음 — python Experiment/E/e1_cross.py --seeds 42 1 2"); return
     for roi, ref in REF_DOBS.items():
         fwd, rev = pooled_bias("2024to2026", roi), pooled_bias("2026to2024", roi)
         dobs = (rev - fwd) / 2; ok = abs(dobs - ref) <= tol

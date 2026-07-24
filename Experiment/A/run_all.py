@@ -44,16 +44,9 @@ def _pairs_in(run):
     return pairs
 
 def _cross_seed_pairs():
-    """δ_obs 소스 선택: E0(동일 early-stop 규약) 우선, 없으면 기존 bias run 중 seed 최다."""
-    e0 = _pairs_in(str(A.A1_OUT / "E0"))
-    if e0:
-        return e0, "E0(early-stop 규약)"
-    best, src = [], None
-    for run in sorted(glob.glob(os.path.join(BIAS_RUNS, "*"))):
-        p = _pairs_in(run)
-        if len(p) > len(best):
-            best, src = p, f"{os.path.basename(run)}(50ep no-stop)"
-    return best, src
+    """δ_obs 소스: E1 cross(동일 early-stop 규약, checkpoint/E1/runs/dorga)."""
+    pairs = _pairs_in(str(A.A1_OUT / "E1" / "runs" / "dorga"))
+    return pairs, "E1 cross(early-stop 규약)"
 
 
 def observed_delta():
@@ -76,21 +69,19 @@ def observed_delta():
 
 
 def verdict(epochs):
-    e1 = json.loads((A.A1_OUT / "E1" / "E1_summary.json").read_text(encoding="utf-8")) \
-        if (A.A1_OUT / "E1" / "E1_summary.json").exists() else None
-    e2 = json.loads((A.A1_OUT / "E2" / "E2_summary.json").read_text(encoding="utf-8")) \
-        if (A.A1_OUT / "E2" / "E2_summary.json").exists() else None
-    e3 = json.loads((A.A1_OUT / "E3" / "E3_summary.json").read_text(encoding="utf-8")) \
-        if (A.A1_OUT / "E3" / "E3_summary.json").exists() else None
-    e4 = json.loads((A.A1_OUT / "E4" / "E4_summary.json").read_text(encoding="utf-8")) \
-        if (A.A1_OUT / "E4" / "E4_summary.json").exists() else None
+    def _ld(sub, fn):
+        p = A.A1_OUT / sub / fn
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+    e2 = _ld("E2", "E2_summary.json")     # raw(A1_test) + matched(A1_test_matched) 통합
+    e3 = _ld("E3", "E3_summary.json")
+    e4 = _ld("E4", "E4_summary.json")
 
-    dg_raw_map     = e1["A1_test"]         if e1 and "A1_test" in e1 else {}          # {key:{delta_g,..}}
+    dg_raw_map     = e2["A1_test"]         if e2 and "A1_test" in e2 else {}          # {key:{delta_g,..}}
     dg_matched_map = e2["A1_test_matched"] if e2 and "A1_test_matched" in e2 else {}
     dobs = observed_delta()
 
     dobs_roi = {k: v for k, v in dobs.items() if k != "_source"} if dobs else {}
-    V = {"E1_delta_g": {k: v["delta_g"] for k, v in dg_raw_map.items()},
+    V = {"E2_delta_g_raw": {k: v["delta_g"] for k, v in dg_raw_map.items()},
          "E2_delta_g_matched": {k: v["delta_g"] for k, v in dg_matched_map.items()},
          "E3_recovery_slope": e3.get("recovery_slope") if e3 else None,
          "E4_leakage": [(c["train_frac"], c["delta_spurious"]) for c in e4["curve"]] if e4 else None,
@@ -150,16 +141,15 @@ def verdict(epochs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", nargs="+", default=["E3", "E0", "E1", "E2", "E4"],
-                    choices=["E0", "E3", "E1", "E2", "E4"])
+    ap.add_argument("--only", nargs="+", default=["E1", "E2", "E3", "E4"],
+                    choices=["E1", "E2", "E3", "E4"])
     ap.add_argument("--verdict_only", action="store_true")
     args = ap.parse_args()
 
     if not args.verdict_only:
-        order = [s for s in ["E3", "E0", "E1", "E2", "E4"] if s in args.only]
-        script = {"E3": "e3_positive_control.py", "E0": "e0_cross.py",
-                  "E1": "e1_indomain_kfold.py", "E2": "e2_matched_indomain.py",
-                  "E4": "e4_negative_control.py"}
+        order = [s for s in ["E1", "E2", "E3", "E4"] if s in args.only]
+        script = {"E1": "e1_cross.py", "E2": "e2_indomain.py",
+                  "E3": "e3_positive_control.py", "E4": "e4_negative_control.py"}
         for step in order:
             run_step(script[step])                     # epochs 고정(50) → 인자 없음
 

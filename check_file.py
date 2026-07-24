@@ -10,7 +10,7 @@ check_file.py — 병합/재배선 파일·구조 검증 하네스
     python check_file.py
 
 동작:
-  STEP1  학습·집계 모듈 12개 import (offline 가능)
+  STEP1  학습·집계 모듈 11개 import (offline 가능)
   STEP2  미포팅 추출기 3개 구문검사(ast) — import 시 최상단 실행이라 syntax만
   STEP3  데이터·가중치 경로 존재 확인 (core 상수 기준)
   STEP4  실데이터 스모크: split → dataset 1샘플 → DORGA/BSNet/PAFE forward
@@ -60,7 +60,7 @@ def _import(relpath, modname):
 
 # ─────────────────────────────────────────────────────────────
 print("=" * 72)
-print("STEP 1 — 학습·집계 모듈 import (12)")
+print("STEP 1 — 학습·집계 모듈 import (11)")
 print("=" * 72)
 CORE = {}
 def _imp_core():
@@ -68,9 +68,8 @@ def _imp_core():
 check("core.py", _imp_core)
 for rel, name in [
     ("Experiment/E/e_common.py", "e_common"),
-    ("Experiment/E/e0_cross.py", "e0_cross"),
-    ("Experiment/E/e1_indomain_kfold.py", "e1_indomain_kfold"),
-    ("Experiment/E/e2_matched_indomain.py", "e2_matched_indomain"),
+    ("Experiment/E/e1_cross.py", "e1_cross"),
+    ("Experiment/E/e2_indomain.py", "e2_indomain"),
     ("Experiment/E/e3_positive_control.py", "e3_positive_control"),
     ("Experiment/E/e4_negative_control.py", "e4_negative_control"),
     ("Experiment/E/summary.py", "e_summary"),

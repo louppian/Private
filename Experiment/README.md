@@ -26,13 +26,15 @@ checkpoint/    가중치 + raw run(json/npz)      (❌ .gitignore, *.pth 전역 
 
 | 라벨 | 의미 | 코드 |
 |---|---|---|
-| **E0** | 실데이터 cross (2024↔2026), δ_obs 재산출 | `E/e0_cross.py` |
-| **E1** | 환자 k-fold in-domain → g₂₄·g₂₆ 추정, H₀:g₂₄=g₂₆ 검정 | `E/e1_indomain_kfold.py` |
-| **E2** | 분포 정합 in-domain → Δg 수축 기원 vs 진짜 비대칭 분리 | `E/e2_matched_indomain.py` |
+| **E1** | 실데이터 cross (2024↔2026) → δ_obs=(rev−fwd)/2 산출 | `E/e1_cross.py` |
+| **E2** | in-domain Δg (raw + 분포정합 matched 통합) → A1 검정 | `E/e2_indomain.py` |
 | **E3** | 반합성 양성대조 → 오프셋 β 복원곡선(추정기 무편향) | `E/e3_positive_control.py` |
 | **E4** | 반합성 음성대조 → 학습량 비대칭 δ 누출 정량화 | `E/e4_negative_control.py` |
 | 공용 | split·dataset·train·bootstrap·δ/γ 분해 | `E/e_common.py` + `core.py` |
 | 집계 | fwd/rev × 모델 × ROI bias 표 | `E/summary.py` → `Result/E/` |
+
+E2 는 `raw`(전 환자, 舊 E1·부록 B)와 `matched`(등급분포 정합, 舊 E2·§5.2 본문)를 한 파일에서
+돌려 `Δg_raw → Δg_matched`(수축분 제거)까지 낸다. `--raw_only` 로 raw 만도 가능.
 
 ### A — 식별가정 (draft §5)
 
@@ -65,11 +67,11 @@ A는 실험이 아니라 **E 산출물로 검증하는 가정**이라 번호별 
 # 서버 검증(병합·재배선 실동작 확인: import + split + dataset + 3모델 forward)
 cd <repo 루트> && python temp.py
 
-# E0 cross (checkpoint/E/runs/dorga/)
-python Experiment/E/e0_cross.py --seeds 42 1 2 --epochs 50
+# E1 cross (checkpoint/E1/runs/dorga/) — 50ep 고정
+python Experiment/E/e1_cross.py --seeds 42 1 2
 
-# A1 전체 판정 (E3→E1→E2→E4 → δ 보정)
-python Experiment/A/run_all.py --epochs 50
+# A1 전체 판정 (E1→E2→E3→E4 → δ 보정)
+python Experiment/A/run_all.py
 
 # 집계 → Result/*/
 python Experiment/E/summary.py

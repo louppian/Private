@@ -23,7 +23,7 @@ import numpy as np
 
 _HERE = Path(__file__).resolve().parent          # Experiment/E
 _REPO = _HERE.parents[1]                          # Private repo 루트
-RUNS_DIR   = _REPO / "checkpoint" / "E" / "runs"  # 입력: core 산출 <model>/<mode>_s<seed>/results.json
+RUNS_DIR   = _REPO / "checkpoint" / "E1" / "runs" # 입력: E1 cross 산출 <model>/<mode>_s<seed>/results.json
 RESULT_DIR = _REPO / "Result" / "E"               # 출력: 집계 CSV (git 추적)
 ROI = ["RT", "LT", "RB", "LB"]
 DIR_LABEL = {"2024to2026": "fwd", "2026to2024": "rev"}

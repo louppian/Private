@@ -4,7 +4,7 @@ check_value_l.py — L 증거 사다리 값이 draft md(§4) 기준과 일치하
 
   L1 구조·분포 (§4.2 표1)   : labels.csv 만으로 즉시 (학습·이미지 불필요, 최속)
   L2 라벨-영상 정합 (§4.3 표2): ROI 3→4 경계 AUC   → roi_features 포팅 후
-  L3 방향 반전 분해 (§4.4 표3/4): E0 npz 의 δ/γ
+  L3 방향 반전 분해 (§4.4 표3/4): E1 npz 의 δ/γ
   L4 재현성 (§4.5 표5)       : 자기일치·κ           → l4_reproducibility 구현 후
 
 실행: python check_value_l.py [--csv labels.csv] [--tol 0.03]
@@ -20,7 +20,7 @@ for _s in (sys.stdout, sys.stderr):
 
 REPO = Path(__file__).resolve().parent
 ROI = ["RT", "LT", "RB", "LB"]
-RUNS = REPO / "checkpoint" / "E" / "runs" / "dorga"
+RUNS = REPO / "checkpoint" / "E1" / "runs" / "dorga"    # E1 cross 산출
 RESULT_L = REPO / "Result" / "L"
 CSV_DEFAULT = "/shared/home/mai/JeongGeon/Private/CXR/Merged/labels.csv"
 
@@ -93,7 +93,7 @@ def check_l3(rec, tol):
     print("\n" + "=" * 76); print(f"[L3] 방향 반전 분해 (§4.4)   runs: {RUNS}"); print("=" * 76)
     fwd_all, rev_all = pooled_bias("2024to2026", None), pooled_bias("2026to2024", None)
     if fwd_all is None or rev_all is None:
-        print("  [SKIP] test_preds.npz 없음 — python Experiment/E/e0_cross.py --seeds 42 1 2"); return
+        print("  [SKIP] test_preds.npz 없음 — python Experiment/E/e1_cross.py --seeds 42 1 2"); return
     print("\n  [표3] 전체 방향편향")
     for tag, got in (("fwd", fwd_all), ("rev", rev_all)):
         ref = REF_BIAS[tag]; ok = abs(got - ref) <= tol
