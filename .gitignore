@@ -1,5 +1,8 @@
-# ── 데이터셋 (외부·대용량) ──
-/CXR
+# ── 데이터셋 (대용량) — CXR 내용은 무시하되 스크립트(.py)는 추적 ──
+#   무시: 2024 CXR/ · 2026 CXR/ · Merged/ · unified_labels.csv
+#   추적: build_dataset.py · inha_dataset.py (CXR 바로 아래 .py)
+/CXR/*
+!/CXR/*.py
 
 # ── 학습 가중치 (재생성 가능, 76GB) — 위치 불문 전역 무시 ──
 *.pth
