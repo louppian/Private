@@ -475,6 +475,11 @@ def run_one_dorga(mode, seed, epochs, root, eval_test_every=1):
             print(f"  ⏹ early stop @epoch {epoch} (best={best_epoch})")
             break
 
+    # ★ 최종 test 는 best_val 모델로 (저장 가중치 = 보고 지표 일치). 마지막 epoch 모델 아님.
+    bvp = run_dir / "best_val_model.pth"
+    if bvp.exists():
+        model.load_state_dict(torch.load(bvp, map_location=DEVICE, weights_only=False)["state_dict"])
+        print(f"  ↻ best_val 모델 로드(epoch {best_epoch}) → 최종 test")
     acc, mae, bias, per, P, Y = evaluate_dorga(model, test_loader)
     _write_results(run_dir, "dorga", mode, seed, TRAIN_Y, TEST_Y, df, epochs, best_epoch,
                    best_val, acc, mae, bias, per, hist, P, Y, test_patients, seed)
@@ -564,6 +569,11 @@ def run_one_scorer(name, mode, seed, epochs, root, eval_test_every=1):
             print(f"  ⏹ early stop @epoch {epoch} (best={best_epoch})")
             break
 
+    # ★ 최종 test 는 best_val 모델로 (저장 가중치 = 보고 지표 일치). 마지막 epoch 모델 아님.
+    bvp = run_dir / "best_val_model.pth"
+    if bvp.exists():
+        scorer.net.load_state_dict(torch.load(bvp, map_location=DEVICE, weights_only=False)["state_dict"])
+        print(f"  ↻ best_val 모델 로드(epoch {best_epoch}) → 최종 test")
     acc, mae, bias, per, P, Y = evaluate_scorer(scorer, test_loader)
     _write_results(run_dir, name, mode, seed, TRAIN_Y, TEST_Y, df, epochs, best_epoch,
                    best_val, acc, mae, bias, per, hist, P, Y, test_patients, seed)
