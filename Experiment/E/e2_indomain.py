@@ -46,21 +46,25 @@ def run_cohort(year, folds, seed, init_seeds, root, keep_pat=None, tag="E2"):
         rng = np.random.default_rng(seed); rng.shuffle(pats)
         fold_list = [(k, pats[k::folds]) for k in range(folds)]
     keys = ["overall"] + list(A.ROI)
-    acc = {k: {} for k in keys}
+    bias_pat = {k: {} for k in keys}
+    Pall, Yall = [], []                                # ACC/MAE 용 (전 arm pool)
     for k, test_pat in fold_list:
         for isd in init_seeds:
-            mode = f"{tag}_{year}_f{k}_is{isd}"
+            mode = f"{tag}_{year}_fold{k}"             # 읽기 쉬운 이름. seed 는 core 가 _s{isd} 로 붙임
             res = A.run_arm(mode, fold_splitter(year, test_pat, seed, keep_pat), isd, A.B.EPOCHS, None, root)
             d = np.load(res["npz"], allow_pickle=True)
             P, Y, pats_te = d["preds"], d["labels"], np.asarray(d["patients"])
+            Pall.append(P); Yall.append(Y)
             for key in keys:
                 e = (P - Y).mean(axis=1) if key == "overall" \
                     else (P[:, A.ROI.index(key)] - Y[:, A.ROI.index(key)]).astype(float)
                 for u in np.unique(pats_te):
-                    acc[key].setdefault(u, []).append(float(e[pats_te == u].mean()))
-    out = {"year": int(year), "n_pat": len(acc["overall"])}
+                    bias_pat[key].setdefault(u, []).append(float(e[pats_te == u].mean()))
+    P, Y = np.vstack(Pall), np.vstack(Yall)
+    out = {"year": int(year), "n_pat": len(bias_pat["overall"]),
+           "acc": float((P == Y).mean()), "mae": float(np.abs(P - Y).mean())}
     for key in keys:
-        vec = np.array([np.mean(acc[key][u]) for u in sorted(acc[key])])
+        vec = np.array([np.mean(bias_pat[key][u]) for u in sorted(bias_pat[key])])
         g, ci = A.mean_ci(vec, seed=seed)
         out[key] = dict(g=g, ci=list(ci), vec=vec.tolist())
     return out
@@ -88,15 +92,15 @@ def main():
     df = A._prep(pd.read_csv(A.MANIFEST))         # match_two_cohorts 가 year·patient 사용
 
     # raw in-domain (전 환자) → Δg_raw
-    raw24 = run_cohort(2024, args.folds, args.seed, args.init_seeds, root, tag="E2raw")
-    raw26 = run_cohort(2026, args.folds, args.seed, args.init_seeds, root, tag="E2raw")
+    raw24 = run_cohort(2024, args.folds, args.seed, args.init_seeds, root, tag="raw")
+    raw26 = run_cohort(2026, args.folds, args.seed, args.init_seeds, root, tag="raw")
     out = {"raw": {"2024": raw24, "2026": raw26}, "A1_test": a1_test(raw24, raw26, keys)}
 
     # 분포 정합 → Δg_matched + 비교
     if not args.raw_only:
         keep24, keep26 = A.match_two_cohorts(df, args.seed)
-        m24 = run_cohort(2024, args.folds, args.seed, args.init_seeds, root, keep_pat=keep24, tag="E2m")
-        m26 = run_cohort(2026, args.folds, args.seed, args.init_seeds, root, keep_pat=keep26, tag="E2m")
+        m24 = run_cohort(2024, args.folds, args.seed, args.init_seeds, root, keep_pat=keep24, tag="matched")
+        m26 = run_cohort(2026, args.folds, args.seed, args.init_seeds, root, keep_pat=keep26, tag="matched")
         out["matched"] = {"2024": m24, "2026": m26, "n": {"2024": len(keep24), "2026": len(keep26)}}
         out["A1_test_matched"] = a1_test(m24, m26, keys)
         out["compare"] = {key: dict(
@@ -119,6 +123,12 @@ def main():
             print(f"{key:<9}{r:>+12.3f}{'—':>14}{'(raw only)':>14}")
     if "matched" in out:
         print(f"(정합 n: 2024={out['matched']['n']['2024']}명 · 2026={out['matched']['n']['2026']}명)")
+
+    print("\n[in-domain 성능 (cross 대조용)]")
+    for variant in [x for x in ("raw", "matched") if x in out]:
+        for yr in ("2024", "2026"):
+            c = out[variant][yr]
+            print(f"  {variant:<8} {yr}: ACC {c['acc']:.4f}  MAE {c['mae']:.4f}  (n_pat {c['n_pat']})")
     print("saved:", root / "E2_summary.json")
 
 

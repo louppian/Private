@@ -41,9 +41,9 @@ def run_frac(year, H1, H2, frac, reps, epochs, cache, root):
     """fwd: train H1(1.0)→test H2,  rev: train H2(frac)→test H1. 약화는 rev(=B=H2)에만."""
     deltas, ss = [], []
     for isd in reps:
-        fwd = A.run_arm(f"E4_{year}_r{frac}_fwd_is{isd}",
+        fwd = A.run_arm(f"E4_{year}_frac{frac}_fwd",
                         degraded_splitter(year, H1, H2, 1.0, isd), isd, epochs, cache, root)
-        rev = A.run_arm(f"E4_{year}_r{frac}_rev_is{isd}",
+        rev = A.run_arm(f"E4_{year}_frac{frac}_rev",
                         degraded_splitter(year, H2, H1, frac, isd), isd, epochs, cache, root)
         dec = A.decompose(fwd["npz"], rev["npz"], seed=isd)
         deltas.append(dec["delta"]); ss.append(dec["s"])

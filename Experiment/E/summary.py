@@ -77,6 +77,22 @@ def export_e2():
         w.writeheader(); w.writerows(rows)
     print(f"[save] {p}")
 
+    # in-domain 성능(ACC/MAE) → e2_performance.csv (cross 성능과 대조용)
+    perf = []
+    for variant in ("raw", "matched"):
+        v = e2.get(variant, {})
+        for yr in ("2024", "2026"):
+            c = v.get(yr, {})
+            if "acc" in c:
+                perf.append(dict(variant=variant, year=yr, acc=round(c["acc"], 4),
+                                 mae=round(c["mae"], 4), n_pat=c.get("n_pat", "")))
+    if perf:
+        pp = RESULT_DIR / "e2_performance.csv"
+        with open(pp, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.DictWriter(f, fieldnames=["variant", "year", "acc", "mae", "n_pat"])
+            w.writeheader(); w.writerows(perf)
+        print(f"[save] {pp}")
+
 
 def main():
     ap = argparse.ArgumentParser()

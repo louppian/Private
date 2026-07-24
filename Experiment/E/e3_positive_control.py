@@ -54,9 +54,9 @@ def run_beta(year, H1, H2, beta, reps, epochs, cache, root):
     """A=H1(오프셋0), B=H2(오프셋β). fwd: train H1→test H2, rev: train H2→test H1."""
     deltas, ss = [], []
     for isd in reps:
-        fwd = A.run_arm(f"E3_{year}_b{beta}_fwd_is{isd}",
+        fwd = A.run_arm(f"E3_{year}_beta{beta}_fwd",
                         half_cross_splitter(year, H1, H2, H2, beta, isd), isd, epochs, cache, root)
-        rev = A.run_arm(f"E3_{year}_b{beta}_rev_is{isd}",
+        rev = A.run_arm(f"E3_{year}_beta{beta}_rev",
                         half_cross_splitter(year, H2, H1, H2, beta, isd), isd, epochs, cache, root)
         dec = A.decompose(fwd["npz"], rev["npz"], seed=isd)
         deltas.append(dec["delta"]); ss.append(dec["s"])
