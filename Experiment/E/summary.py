@@ -10,8 +10,9 @@ test2024) 에서 양수로 뒤집히면 = 코호트 간 라벨 calibration 차�
   콘솔 표 + <OUT_ROOT>/summary.csv + <OUT_ROOT>/verdict.txt
 
 실행:
-  python w6_summary.py                      # 기본 경로(CONFIG)
-  python w6_summary.py --runs /path/to/w6_out/runs
+  python Experiment/E/summary.py            # checkpoint/E1/runs 집계 → Result/E/summary.csv
+  python Experiment/E/summary.py --runs /path/to/runs
+  (E2 Δg 는 checkpoint/E2/E2_summary.json → Result/E/e2_delta_g.csv 로 함께 export)
 """
 import argparse
 import csv

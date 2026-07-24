@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 r"""
-W6 — 방향별 3-seed 가중치 저장 (DORGA · BSNet · PAFE, 자립 실행판)
+core.py — 학습 엔진 (DORGA · BSNet · PAFE, 자립). Experiment 전 실험의 코어.
 
-각 모델을 2024→2026(fwd) / 2026→2024(rev) × seed 1·2·42 로 학습하고, best_val
-체크포인트를 fwd1..3 / rev1..3 으로 모은다. 영역 순서 전 모델 [RT, LT, RB, LB].
+각 모델을 2024→2026(fwd) / 2026→2024(rev) × seed 1·2·42 로 학습. cross split·
+dataset·train loop·loss·eval·bootstrap 을 제공하고, E1~E4 드라이버가 import 해 쓴다.
+영역 순서 전 모델 [RT, LT, RB, LB]. 산출 → checkpoint/E/ (OUT_ROOT).
 
-  fwd1 = 2024→2026 s1   fwd2 = 2024→2026 s2   fwd3 = 2024→2026 s42
-  rev1 = 2026→2024 s1   rev2 = 2026→2024 s2   rev3 = 2026→2024 s42
+  fwd = 2024→2026,  rev = 2026→2024,  seed 1·2·42
 
-저장 위치: <OUT_ROOT>/weights/<model>/{fwd,rev}{1,2,3}.pth  (model = dorga|bsnet|pafe)
-
-데이터 (CXR/Merged, build_unified_dataset.py 산출):
+데이터 (CXR/Merged, build_dataset.py 산출):
   · labels.csv  : uid, patient_id, RT, LT, RB, LB, …  (patient_id 접두어 24_/26_ = 연도)
   · images/<uid>.png : 정렬 완료 이미지 (연도 무관 한 폴더). seg+STN 이미 적용됨 → 재정렬 없음.
   · masks/<uid>.png  : 정렬 마스크 (DORGA rel/roi · BSNet 하드어텐션용).
@@ -24,10 +22,11 @@ W6 — 방향별 3-seed 가중치 저장 (DORGA · BSNet · PAFE, 자립 실행�
 완전 자립: 외부 dorga 패키지(C:\Code\DORGA)·npjDM 하네스 의존 없음. Private repo + timm.
 
 경로는 아래 CONFIG 상수만 서버 실경로로 맞추면 됨.
-실행:
-  python w6_weights.py                     # 3모델 × 6 arm
-  python w6_weights.py --models bsnet pafe  # 일부만
-  python w6_weights.py --skip-existing      # 중단 후 이어서
+독립 실행(3모델 cross 일괄):
+  python Experiment/core.py                     # 3모델 × 6 arm → checkpoint/E
+  python Experiment/core.py --models bsnet pafe # 일부만
+  python Experiment/core.py --skip-existing     # 중단 후 이어서
+(단일 실험은 E1~E4 드라이버 사용: Experiment/E/e1_cross.py 등)
 """
 from __future__ import annotations
 
