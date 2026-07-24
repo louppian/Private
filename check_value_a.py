@@ -21,7 +21,7 @@ for _s in (sys.stdout, sys.stderr):
 REPO = Path(__file__).resolve().parent
 CKPT = REPO / "checkpoint"
 ROI = ["RT", "LT", "RB", "LB"]
-RUNS = CKPT / "E1" / "runs" / "dorga"
+RUNS = CKPT / "E1" / "dorga"
 
 REF_DOBS = {"RB": +0.198, "LT": +0.138}                        # §4.4 표4
 REF_DCORR = {"RB": +0.147, "LT": +0.064}                       # §5.3 표
@@ -29,7 +29,7 @@ REF_EXCLUDE0 = {"RB"}                                          # δ_corr CI 0 �
 
 
 def pooled_bias(mode, roi):
-    files = sorted(glob.glob(str(RUNS / f"{mode}_s*" / "test_preds.npz")))
+    files = sorted(glob.glob(str(RUNS / f"{mode}_split*" / "test_preds.npz")))
     if not files:
         return None
     Ps, Ys, PT = [], [], []
@@ -43,11 +43,11 @@ def pooled_bias(mode, roi):
 
 def check_dobs(rec, tol):
     print("\n" + "=" * 76); print("[δ_obs] 방향반전 관측 라벨성분 (§4.4 표4)"); print("=" * 76)
-    fok = all(pooled_bias(m, "RB") is not None for m in ("2024to2026", "2026to2024"))
+    fok = all(pooled_bias(m, "RB") is not None for m in ("24to26", "26to24"))
     if not fok:
-        print("  [SKIP] E1 npz 없음 — python Experiment/E/e1_cross.py --seeds 42 1 2"); return
+        print("  [SKIP] E1 npz 없음 — python Experiment/E/e1_cross.py"); return
     for roi, ref in REF_DOBS.items():
-        fwd, rev = pooled_bias("2024to2026", roi), pooled_bias("2026to2024", roi)
+        fwd, rev = pooled_bias("24to26", roi), pooled_bias("26to24", roi)
         dobs = (rev - fwd) / 2; ok = abs(dobs - ref) <= tol
         print(f"  {roi}  δ_obs ref{ref:+.3f} got{dobs:+.3f}  {'OK' if ok else 'X'}"); rec(ok, f"δ_obs {roi}≈{ref:+.3f}")
 

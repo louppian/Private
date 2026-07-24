@@ -31,7 +31,7 @@ def fold_splitter(year, test_pat, seed, keep_pat=None):
         pool = np.array([p for p in A._patients_of(df, year)
                          if p not in te and (keep is None or p in keep)], dtype=object)
         rng = np.random.default_rng(seed); rng.shuffle(pool)
-        n_val = max(2, int(round(len(pool) * A.B.VAL_FRAC)))
+        n_val = max(2, int(round(len(pool) * 0.20)))     # 8:2 (val 20%, E1 과 동일)
         return A._mark(df, pool[n_val:], pool[:n_val], test_pat, year), year, year
     return _fn
 
@@ -87,7 +87,7 @@ def main():
     ap.add_argument("--raw_only", action="store_true", help="정합 없이 raw in-domain 만")
     args = ap.parse_args()
 
-    root = A.A1_OUT / "E2"
+    root = A.A1_OUT / "E2" / "dorga"              # checkpoint/E2/dorga (E1 과 동일 규약)
     keys = ["overall"] + list(A.ROI)
     df = A._prep(pd.read_csv(A.MANIFEST))         # match_two_cohorts 가 year·patient 사용
 

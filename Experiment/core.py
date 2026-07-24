@@ -380,7 +380,7 @@ def patient_bootstrap_ci(P, Y, patients, n_boot=5000, seed=0):
 # ═══════════════════════════════════════════════════════════
 # DORGA arm 학습
 # ═══════════════════════════════════════════════════════════
-def run_one_dorga(mode, seed, epochs, root, eval_test_every=1):
+def run_one_dorga(mode, seed, epochs, root, eval_test_every=1, arm=None):
     set_seed(seed)
     df = pd.read_csv(CSV_PATH)
     df, TRAIN_Y, TEST_Y = make_split(df, mode, seed)
@@ -415,7 +415,7 @@ def run_one_dorga(mode, seed, epochs, root, eval_test_every=1):
     optimizer = _make_optimizer(model)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-    run_dir = root / f"{mode}_s{seed}"
+    run_dir = root / (arm if arm else f"{mode}_s{seed}")
     run_dir.mkdir(parents=True, exist_ok=True)
 
     best_val, best_epoch, hist, since = float("inf"), -1, [], 0
@@ -500,7 +500,7 @@ def load_private_scorer(name):
     return mod.build_scorer
 
 
-def run_one_scorer(name, mode, seed, epochs, root, eval_test_every=1):
+def run_one_scorer(name, mode, seed, epochs, root, eval_test_every=1, arm=None):
     set_seed(seed)
     df = pd.read_csv(CSV_PATH)
     df, TRAIN_Y, TEST_Y = make_split(df, mode, seed)
@@ -522,7 +522,7 @@ def run_one_scorer(name, mode, seed, epochs, root, eval_test_every=1):
     train_loader, val_loader, test_loader = mk("train", True, True), mk("val", False, False), mk("test", False, False)
     test_patients = df[df.split == "test"][PATIENT_COL].to_numpy()
 
-    run_dir = root / f"{mode}_s{seed}"
+    run_dir = root / (arm if arm else f"{mode}_s{seed}")
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # freeze 없음 — 처음부터 백본(1e-5)+헤드(1e-4) 함께 학습
@@ -608,11 +608,11 @@ DEFAULT_MODELS = ["dorga", "bsnet", "pafe"]
 DIRECTIONS = [("2024to2026", "fwd"), ("2026to2024", "rev")]
 
 
-def train_arm(model, mode, seed, epochs, stage_root):
+def train_arm(model, mode, seed, epochs, stage_root, arm=None):
     if model == "dorga":
-        run_one_dorga(mode, seed, epochs, stage_root)
+        run_one_dorga(mode, seed, epochs, stage_root, arm=arm)
     else:
-        run_one_scorer(model, mode, seed, epochs, stage_root)
+        run_one_scorer(model, mode, seed, epochs, stage_root, arm=arm)
 
 
 def _load_result(run_dir: Path) -> dict:

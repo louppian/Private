@@ -20,7 +20,7 @@ for _s in (sys.stdout, sys.stderr):
 
 REPO = Path(__file__).resolve().parent
 ROI = ["RT", "LT", "RB", "LB"]
-RUNS = REPO / "checkpoint" / "E1" / "runs" / "dorga"    # E1 cross 산출
+RUNS = REPO / "checkpoint" / "E1" / "dorga"    # E1 cross 산출
 RESULT_L = REPO / "Result" / "L"
 CSV_DEFAULT = "/shared/home/mai/JeongGeon/Private/CXR/Merged/labels.csv"
 
@@ -40,7 +40,7 @@ REVERSAL = ["RB", "LT"]
 
 
 def pooled_bias(mode, roi):
-    files = sorted(glob.glob(str(RUNS / f"{mode}_s*" / "test_preds.npz")))
+    files = sorted(glob.glob(str(RUNS / f"{mode}_split*" / "test_preds.npz")))
     if not files:
         return None
     Ps, Ys, PT = [], [], []
@@ -91,9 +91,9 @@ def check_l2(rec, tol):
 
 def check_l3(rec, tol):
     print("\n" + "=" * 76); print(f"[L3] 방향 반전 분해 (§4.4)   runs: {RUNS}"); print("=" * 76)
-    fwd_all, rev_all = pooled_bias("2024to2026", None), pooled_bias("2026to2024", None)
+    fwd_all, rev_all = pooled_bias("24to26", None), pooled_bias("26to24", None)
     if fwd_all is None or rev_all is None:
-        print("  [SKIP] test_preds.npz 없음 — python Experiment/E/e1_cross.py --seeds 42 1 2"); return
+        print("  [SKIP] test_preds.npz 없음 — python Experiment/E/e1_cross.py"); return
     print("\n  [표3] 전체 방향편향")
     for tag, got in (("fwd", fwd_all), ("rev", rev_all)):
         ref = REF_BIAS[tag]; ok = abs(got - ref) <= tol
@@ -101,15 +101,15 @@ def check_l3(rec, tol):
         rec(ok, f"L3 표3 {tag}≈{ref:+.3f}")
     print("\n  [표4] ROI δ(라벨)/γ(모델)")
     for roi in ["overall"] + ROI:
-        fwd = fwd_all if roi == "overall" else pooled_bias("2024to2026", roi)
-        rev = rev_all if roi == "overall" else pooled_bias("2026to2024", roi)
+        fwd = fwd_all if roi == "overall" else pooled_bias("24to26", roi)
+        rev = rev_all if roi == "overall" else pooled_bias("26to24", roi)
         dg, gg = (rev - fwd) / 2, (rev + fwd) / 2; dr, gr = REF_L3[roi]
         okd, okg = abs(dg - dr) <= tol, abs(gg - gr) <= tol
         print(f"    {roi:8} δ ref{dr:+.3f} got{dg:+.3f} {'OK' if okd else 'X'}   γ ref{gr:+.3f} got{gg:+.3f} {'OK' if okg else 'X'}")
         rec(okd, f"L3 {roi} δ≈{dr:+.3f}"); rec(okg, f"L3 {roi} γ≈{gr:+.3f}")
     print("\n  [부호반전] RB·LT")
     for roi in REVERSAL:
-        fwd, rev = pooled_bias("2024to2026", roi), pooled_bias("2026to2024", roi)
+        fwd, rev = pooled_bias("24to26", roi), pooled_bias("26to24", roi)
         ok = fwd < 0 < rev
         print(f"    {roi}: fwd{fwd:+.3f} rev{rev:+.3f} → {'반전 OK' if ok else '반전아님 X'}"); rec(ok, f"L3 {roi} 부호반전")
 

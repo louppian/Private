@@ -158,13 +158,13 @@ def match_two_cohorts(df, seed, n_bins=5):
 # ═══════════════════════════════════════════════════════════════
 # 실행 래퍼 — 등록된 mode 로 B.run_one 호출
 # ═══════════════════════════════════════════════════════════════
-def run_arm(mode, splitter, seed, epochs, cache=None, root=None, model="dorga"):
+def run_arm(mode, splitter, seed, epochs, cache=None, root=None, model="dorga", arm=None):
     """splitter 등록 후 core.train_arm 실행. cache 인자는 하위호환용(무시 — 사전정렬 디스크 로드).
-    results dict(+ test_preds.npz 경로) 반환. model 로 dorga|bsnet|pafe 선택(기본 dorga)."""
+    arm 주면 run_dir 이름을 그걸로(미지정 시 {mode}_s{seed}). results dict(+ npz) 반환."""
     register(mode, splitter)
     root = Path(root)
-    B.train_arm(model, mode, seed, epochs, root)
-    run_dir = root / f"{mode}_s{seed}"
+    B.train_arm(model, mode, seed, epochs, root, arm=arm)
+    run_dir = root / (arm if arm else f"{mode}_s{seed}")
     res = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
     res["npz"] = str(run_dir / "test_preds.npz")
     return res

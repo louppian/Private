@@ -24,16 +24,18 @@ import numpy as np
 
 _HERE = Path(__file__).resolve().parent          # Experiment/E
 _REPO = _HERE.parents[1]                          # Private repo 루트
-RUNS_DIR   = _REPO / "checkpoint" / "E1" / "runs" # 입력: E1 cross 산출 <model>/<mode>_s<seed>/results.json
-RESULT_DIR = _REPO / "Result" / "E"               # 출력: 집계 CSV (git 추적)
+RUNS_DIR   = _REPO / "checkpoint" / "E1" / "dorga"  # 입력: {24to26,26to24}_split{k}/results.json
+RESULT_DIR = _REPO / "Result" / "E"                 # 출력: 집계 CSV (git 추적)
 ROI = ["RT", "LT", "RB", "LB"]
-DIR_LABEL = {"2024to2026": "fwd", "2026to2024": "rev"}
-MODELS = ["dorga", "bsnet", "pafe"]
+
+
+def _dir(mode):
+    return "fwd" if str(mode).startswith("24to26") else "rev"
 
 
 def load_all(runs_dir: Path):
     recs = []
-    for p in sorted(runs_dir.glob("*/*/results.json")):
+    for p in sorted(runs_dir.glob("*/results.json")):     # {tag}_split{k}/results.json
         try:
             recs.append(json.loads(p.read_text(encoding="utf-8")))
         except Exception as e:
@@ -54,7 +56,7 @@ def fmt(m, s):
 
 def export_e2():
     """checkpoint/E2/E2_summary.json → Result/E/e2_delta_g.csv (Δg_raw·matched·CI, git 추적)."""
-    e2p = _REPO / "checkpoint" / "E2" / "E2_summary.json"
+    e2p = _REPO / "checkpoint" / "E2" / "dorga" / "E2_summary.json"
     if not e2p.exists():
         return
     e2 = json.loads(e2p.read_text(encoding="utf-8"))
@@ -108,56 +110,45 @@ def main():
         return
     print(f"[load] results.json {len(recs)}개  ({runs_dir})")
 
-    # (model, dir) -> [records]
-    G = defaultdict(list)
+    G = {"fwd": [], "rev": []}
     for r in recs:
-        G[(r["model"], DIR_LABEL.get(r["mode"], r["mode"]))].append(r)
+        G[_dir(r["mode"])].append(r)
+    fwd, rev = G["fwd"], G["rev"]
 
-    csv_rows = []
-    verdict_lines = []
-    for model in MODELS:
-        fwd, rev = G.get((model, "fwd"), []), G.get((model, "rev"), [])
-        if not (fwd or rev):
+    csv_rows, verdict_lines = [], []
+    head = f"[dorga]  fwd(2024→2026) vs rev(2026→2024)  | splits fwd={len(fwd)} rev={len(rev)}"
+    print("\n" + "=" * 78); print(head); print("=" * 78); verdict_lines.append(head)
+
+    for tag, rr in (("fwd", fwd), ("rev", rev)):
+        if not rr:
             continue
-        head = f"[{model}]  fwd(train2024→test2026) vs rev(train2026→test2024)  " \
-               f"| seeds fwd={len(fwd)} rev={len(rev)}"
-        print("\n" + "=" * 78); print(head); print("=" * 78)
-        verdict_lines.append("\n" + head)
+        mae = ms([r["mae"] for r in rr]); acc = ms([r["acc"] for r in rr]); bia = ms([r["bias"] for r in rr])
+        line = f"  [{tag}] test  MAE {fmt(*mae).replace('+','')}  " \
+               f"ACC {fmt(*acc).replace('+','')}  overall bias {fmt(*bia)}"
+        print(line); verdict_lines.append(line)
 
-        # 전체 test 지표
-        for tag, rr in (("fwd", fwd), ("rev", rev)):
-            if not rr:
-                continue
-            mae = ms([r["mae"] for r in rr]); acc = ms([r["acc"] for r in rr])
-            bia = ms([r["bias"] for r in rr])
-            line = f"  [{tag}] test  MAE {fmt(*mae).replace('+','')}  " \
-                   f"ACC {fmt(*acc).replace('+','')}  overall bias {fmt(*bia)}"
-            print(line); verdict_lines.append(line)
+    print(f"\n  {'ROI':<6}{'fwd bias':>16}{'rev bias':>16}{'flip(H_data)':>16}")
+    n_flip = 0
+    for roi in ["overall"] + ROI:
+        if roi == "overall":
+            fb = [r["bias"] for r in fwd]; rb = [r["bias"] for r in rev]
+        else:
+            fb = [r["per_roi"][roi]["bias"] for r in fwd]
+            rb = [r["per_roi"][roi]["bias"] for r in rev]
+        fm, fs = ms(fb); rm, rs = ms(rb)
+        flip = (not np.isnan(fm) and not np.isnan(rm) and fm < 0 < rm)
+        if roi != "overall" and flip:
+            n_flip += 1
+        mark = "  YES" if flip else ("  no" if not np.isnan(fm) else "  -")
+        row = f"  {roi:<6}{fmt(fm, fs):>16}{fmt(rm, rs):>16}{mark:>16}"
+        print(row); verdict_lines.append(row)
+        csv_rows.append(dict(model="dorga", roi=roi,
+                             fwd_bias_mean=round(fm, 4), fwd_bias_sd=round(fs, 4),
+                             rev_bias_mean=round(rm, 4), rev_bias_sd=round(rs, 4),
+                             flip_Hdata=int(flip)))
 
-        # 영역별 bias 표 + 방향반전
-        print(f"\n  {'ROI':<6}{'fwd bias':>16}{'rev bias':>16}{'flip(H_data)':>16}")
-        n_flip = 0
-        for roi in ["overall"] + ROI:
-            if roi == "overall":
-                fb = [r["bias"] for r in fwd]; rb = [r["bias"] for r in rev]
-            else:
-                fb = [r["per_roi"][roi]["bias"] for r in fwd]
-                rb = [r["per_roi"][roi]["bias"] for r in rev]
-            fm, fs = ms(fb); rm, rs = ms(rb)
-            # H_data 방향반전: fwd 음수 → rev 양수 (과소예측이 반대편에서 과대예측으로)
-            flip = (not np.isnan(fm) and not np.isnan(rm) and fm < 0 < rm)
-            if roi != "overall" and flip:
-                n_flip += 1
-            mark = "  YES" if flip else ("  no" if not np.isnan(fm) else "  -")
-            row = f"  {roi:<6}{fmt(fm, fs):>16}{fmt(rm, rs):>16}{mark:>16}"
-            print(row); verdict_lines.append(row)
-            csv_rows.append(dict(model=model, roi=roi,
-                                 fwd_bias_mean=round(fm, 4), fwd_bias_sd=round(fs, 4),
-                                 rev_bias_mean=round(rm, 4), rev_bias_sd=round(rs, 4),
-                                 flip_Hdata=int(flip)))
-
-        v = f"  → {model}: 4개 영역 중 {n_flip}개에서 H_data 방향반전(fwd<0<rev)"
-        print(v); verdict_lines.append(v)
+    v = f"  → dorga: 4개 영역 중 {n_flip}개에서 방향반전(fwd<0<rev)"
+    print(v); verdict_lines.append(v)
 
     # 저장 → Result/E/ (git 추적)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)

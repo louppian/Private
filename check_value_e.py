@@ -21,7 +21,7 @@ for _s in (sys.stdout, sys.stderr):
 REPO = Path(__file__).resolve().parent
 CKPT = REPO / "checkpoint"
 ROI = ["RT", "LT", "RB", "LB"]
-RUNS = CKPT / "E1" / "runs" / "dorga"
+RUNS = CKPT / "E1" / "dorga"
 
 REF_BIAS = {"fwd": -0.231, "rev": +0.004}                       # §4.4 표3 (E1)
 REF_E2_DG = {"RB": -0.102}                                      # §5.2/5.3 검산값
@@ -30,7 +30,7 @@ REF_E4 = {1.0: +0.045, 0.5: +0.061, 0.25: -0.203}              # §5.3 누출
 
 
 def pooled_bias(mode):
-    files = sorted(glob.glob(str(RUNS / f"{mode}_s*" / "test_preds.npz")))
+    files = sorted(glob.glob(str(RUNS / f"{mode}_split*" / "test_preds.npz")))
     if not files:
         return None
     Ps, Ys, PT = [], [], []
@@ -43,15 +43,15 @@ def pooled_bias(mode):
 
 
 def _load(name):
-    p = CKPT / name.split("/")[0] / name.split("/")[1]
+    p = CKPT.joinpath(*name.split("/"))
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
 def check_e1(rec, tol):
     print("\n" + "=" * 76); print(f"[E1] cross 방향편향 (§4.4)   runs: {RUNS}"); print("=" * 76)
-    fwd, rev = pooled_bias("2024to2026"), pooled_bias("2026to2024")
+    fwd, rev = pooled_bias("24to26"), pooled_bias("26to24")
     if fwd is None or rev is None:
-        print("  [SKIP] npz 없음 — python Experiment/E/e1_cross.py --seeds 42 1 2"); return
+        print("  [SKIP] npz 없음 — python Experiment/E/e1_cross.py"); return
     for tag, got in (("fwd", fwd), ("rev", rev)):
         ref = REF_BIAS[tag]; ok = abs(got - ref) <= tol
         print(f"  {tag}  ref{ref:+.3f} got{got:+.3f} Δ{got-ref:+.3f}  {'OK' if ok else 'X'}"); rec(ok, f"E1 {tag}≈{ref:+.3f}")
@@ -59,9 +59,9 @@ def check_e1(rec, tol):
 
 def check_e2(rec, tol):
     print("\n" + "=" * 76); print("[E2] 정합 in-domain Δγ (§5.2)"); print("=" * 76)
-    e2 = _load("E2/E2_summary.json")
+    e2 = _load("E2/dorga/E2_summary.json")
     if not e2:
-        print("  [SKIP] checkpoint/E2/E2_summary.json 없음 — e2_indomain.py 실행 후"); return
+        print("  [SKIP] checkpoint/E2/dorga/E2_summary.json 없음 — e2_indomain.py 실행 후"); return
     m = e2.get("A1_test_matched", {})
     if not m:
         print("  [SKIP] A1_test_matched 키 없음"); return
