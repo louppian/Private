@@ -71,7 +71,7 @@ MERGED    = Path(f"{BASE}/CXR/Merged")               # labels.csv image_path 의
 IMG_DIR   = Path(f"{BASE}/CXR/Merged/images_normalize")   # ★ seg+STN 정렬 완료 이미지 <uid>.png
 MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks")              # ★ 정렬 마스크 <uid>.png
 CSV_PATH  = f"{BASE}/CXR/Merged/labels.csv"          # uid, patient_id, RT, LT, RB, LB, image_path, …
-MRM_W     = Path("/shared/home/mai/JeongGeon/MICCAI2026/MRM.pth")   # DORGA 백본
+MRM_W     = Path("/shared/home/mai/JeongGeon/IEEETMI/weight/DORGA_Brixia.pth")   # DORGA 백본
 OUT_ROOT  = Path(f"{BASE}/w6_out")                   # 산출물
 
 # ── 하이퍼파라미터 ──
@@ -83,7 +83,7 @@ IMG_SIZE     = 512
 R, C, K      = 4, 5, 7
 PROJ_DIM     = 768
 BATCH_SIZE   = 32
-FREEZE_BLOCKS = 0          # 동결 없음 — 백본 전체 학습(1e-5) + 헤드(1e-4)
+FREEZE_BLOCKS = 6          # 동결 없음 — 백본 전체 학습(1e-5) + 헤드(1e-4)
 VAL_FRAC     = 0.10          # train:val = 9:1
 TAIL_EPOCHS  = 5
 EARLYSTOP_PATIENCE = 10
@@ -239,8 +239,7 @@ def split_lungs_to_four(mask_bin, min_area=1000):
 # ═══════════════════════════════════════════════════════════
 # 공용 로더 — 정렬 이미지 <uid>.png + 마스크 <uid>.png
 # ═══════════════════════════════════════════════════════════
-_PHOTO = transforms.Compose([transforms.ToTensor(),
-                             transforms.Normalize(NORM_MEAN, NORM_STD)])
+_PHOTO = transforms.Compose([transforms.ToTensor(), transforms.Normalize(NORM_MEAN, NORM_STD)])
 _EXTS = (".png", ".jpg", ".jpeg", ".PNG", ".JPG")
 
 

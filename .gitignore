@@ -4,3 +4,4 @@
 /Model/SegSTN/weights
 **/__pycache__/
 *.pyc
+/w6_out

@@ -208,10 +208,9 @@ if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("model", nargs="?", default="bsnet", choices=list(MODELS))
-    ap.add_argument("--epochs", type=int, default=80)
+    ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--lr", type=float, default=None)
     ap.add_argument("--backbone-lr", type=float, default=None)
     a = ap.parse_args()
-    train(a.model, epochs=a.epochs, batch=a.batch, lr=a.lr,
-          backbone_lr=a.backbone_lr)
+    train(a.model, epochs=a.epochs, batch=a.batch, lr=a.lr, backbone_lr=a.backbone_lr)

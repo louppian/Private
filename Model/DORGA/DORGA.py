@@ -416,7 +416,7 @@ class BrixiaViT512Dynamic(nn.Module):
         rel = torch.stack(rels).to(x.device)
         roi_masks = torch.stack(rms).to(x.device)
         return self.forward(x, rel, masks=roi_masks)["logits_s3"]
-
+  
 
 # ═══════════════════════════════════════════════════════════
 # ViT 팩토리 (timm)
