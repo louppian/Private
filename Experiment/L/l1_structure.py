@@ -1,16 +1,74 @@
 # -*- coding: utf-8 -*-
-r"""L0–L1 — 구조·분포 진단 → Result/L/l1_structure.csv  (draft §4.2)
+r"""
+L0–L1 — 구조·분포 (draft §4.2 표1) → Result/L/l1_structure.csv
 
-증거 사다리 최하단. labels.csv 만으로 계산 가능(모델·영상 불필요).
+labels.csv 만으로 계산(학습·이미지·GPU 불필요, 최속). 연도 = patient_id 접두어 24_/26_.
 
-계산 항목:
-  · L0 무결성   : image-label 매칭 불일치 수, 환자 단위 split 누수 수 (둘 다 0 기대)
-  · L1 분포     : 환자수/영상수, 환자당 시퀀스 길이(연도간 Mann-Whitney),
-                  전체 평균등급, 등급 0·4 비율
-  · 마르코프    : 환자별 1차 등급 전이행렬의 방향비(악화/유지/호전) 연도간 비교
-                  (질병 동역학 동일성 확인 → 차이는 동역학이 아니라 출발 분포·기준)
+지표: 환자수·영상수·환자당 시퀀스길이·전체 평균등급·등급0~4 비율.
+(마르코프 등급전이 방향비는 시퀀스 순서 컬럼이 필요 — labels.csv 에 순서/시간이 없어 생략.
+ build_dataset 에서 순서 컬럼을 넣으면 여기에 추가한다.)
 
-영역 순서 [RT, LT, RB, LB] 고정. 연도 = patient_id 접두어 24_/26_.
-
-TODO: labels.csv 로드 → 위 지표 표(표1) 산출 → Result/L/l1_structure.csv.
+실행: python Experiment/L/l1_structure.py [--csv labels.csv]
 """
+import argparse
+import csv
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+REPO = Path(__file__).resolve().parents[2]
+ROI = ["RT", "LT", "RB", "LB"]
+CSV_DEFAULT = "/shared/home/mai/JeongGeon/Private/CXR/Merged/labels.csv"
+OUT = REPO / "Result" / "L" / "l1_structure.csv"
+
+REF = {"n_pat": (68, 46), "n_img": (718, 587), "seq": (10.56, 12.76),
+       "mean": (1.640, 1.427), "g0": (0.165, 0.236), "g4": (0.093, 0.070)}   # md 표1
+
+
+def cohort_stats(df, yr):
+    s = df[df.year == yr]
+    g = s[ROI].to_numpy()
+    npat = int(s["patient_id"].nunique())
+    return {"n_pat": npat, "n_img": int(len(s)), "seq": len(s) / max(npat, 1),
+            "mean": float(g.mean()),
+            **{f"g{k}": float((g == k).mean()) for k in range(5)}}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", default=CSV_DEFAULT)
+    args = ap.parse_args()
+    if not Path(args.csv).exists():
+        sys.exit(f"[중단] labels.csv 없음: {args.csv}")
+
+    df = pd.read_csv(args.csv)
+    df["year"] = df["patient_id"].astype(str).str[:2].map({"24": 2024, "26": 2026})
+    v24, v26 = cohort_stats(df, 2024), cohort_stats(df, 2026)
+
+    keys = ["n_pat", "n_img", "seq", "mean", "g0", "g1", "g2", "g3", "g4"]
+    rows = []
+    for k in keys:
+        r24, r26 = REF.get(k, ("", ""))
+        rows.append(dict(metric=k,
+                         y2024=round(v24[k], 4), y2026=round(v26[k], 4),
+                         ref2024=r24, ref2026=r26))
+
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    with open(OUT, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=["metric", "y2024", "y2026", "ref2024", "ref2026"])
+        w.writeheader(); w.writerows(rows)
+    print(f"[save] {OUT}")
+    for r in rows:
+        print(f"  {r['metric']:<7} 2024 {r['y2024']:>8} (ref {r['ref2024']})   "
+              f"2026 {r['y2026']:>8} (ref {r['ref2026']})")
+
+
+if __name__ == "__main__":
+    main()

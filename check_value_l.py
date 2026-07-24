@@ -114,11 +114,23 @@ def check_l3(rec, tol):
         print(f"    {roi}: fwd{fwd:+.3f} rev{rev:+.3f} → {'반전 OK' if ok else '반전아님 X'}"); rec(ok, f"L3 {roi} 부호반전")
 
 
+REF_L4 = {"RT": (0.798, 0.887), "LT": (0.882, 0.848), "RB": (0.689, 0.899)}   # md 표5 (ACC, wκ)
+
+
 def check_l4(rec, tol):
     print("\n" + "=" * 76); print("[L4] 재현성 κ (§4.5 표5)"); print("=" * 76)
     src = RESULT_L / "l4_reproducibility.csv"
-    print(f"  [SKIP] {src} 없음 — l4_reproducibility.py 구현 후 대조" if not src.exists()
-          else "  (구현 시 자기일치 ACC·weighted κ 대조 추가)")
+    if not src.exists():
+        print(f"  [SKIP] {src} 없음 — 재측정 데이터로 l4_reproducibility.py 실행 후"); return
+    got = pd.read_csv(src)
+    for roi, (ra, rk) in REF_L4.items():
+        row = got[got.roi == roi]
+        if row.empty:
+            rec(False, f"L4 {roi} 없음"); continue
+        a, k = float(row.self_acc.iloc[0]), float(row.weighted_kappa.iloc[0])
+        oka, okk = abs(a - ra) <= tol, abs(k - rk) <= tol
+        print(f"  {roi}  ACC {a:.3f}(ref{ra}) {'OK' if oka else 'X'}   wκ {k:.3f}(ref{rk}) {'OK' if okk else 'X'}")
+        rec(oka, f"L4 {roi} ACC≈{ra}"); rec(okk, f"L4 {roi} wκ≈{rk}")
 
 
 def main():
