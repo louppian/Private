@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 for _s in (sys.stdout, sys.stderr):          # cp949 콘솔 크래시 방지
     try:
@@ -32,6 +33,13 @@ for _s in (sys.stdout, sys.stderr):          # cp949 콘솔 크래시 방지
 REPO = Path(__file__).resolve().parent
 ROI = ["RT", "LT", "RB", "LB"]
 RUNS = REPO / "checkpoint" / "E" / "runs" / "dorga"
+CSV_DEFAULT = "/shared/home/mai/JeongGeon/Private/CXR/Merged/labels.csv"
+
+# ── draft §4.2 표1 (L1 구조·분포) — labels.csv 만으로 계산(학습·이미지 불필요, 최속) ──
+REF_L1 = {
+    2024: {"n_pat": 68, "n_img": 718, "seq": 10.56, "mean": 1.640, "g0": 0.165, "g4": 0.093},
+    2026: {"n_pat": 46, "n_img": 587, "seq": 12.76, "mean": 1.427, "g0": 0.236, "g4": 0.070},
+}
 
 # ── draft §4.4 기준값 ──
 REF_BIAS = {"fwd": -0.231, "rev": +0.004}                      # 표3 전체 방향별 편향
@@ -62,9 +70,42 @@ def pooled_bias(mode, roi):
     return float(np.array([e[pt == p].mean() for p in u]).mean())
 
 
+def check_l1(csv_path, rec, tol):
+    """L1(구조·분포) — labels.csv 만으로 표1 대조. 학습·이미지·GPU 불필요(최속)."""
+    print("\n" + "=" * 76)
+    print(f"[L1] 구조·분포 (draft §4.2 표1)   csv: {csv_path}")
+    print("=" * 76)
+    if not Path(csv_path).exists():
+        print("  [SKIP] labels.csv 없음 (--csv 로 지정)")
+        return
+    df = pd.read_csv(csv_path)
+    df["year"] = df["patient_id"].astype(str).str[:2].map({"24": 2024, "26": 2026})
+    print(f"  {'지표':<14}{'2024 ref/got':>22}{'2026 ref/got':>22}")
+    for key, label, is_cnt, tl in [
+        ("n_pat", "환자 수", True, 0), ("n_img", "영상 수", True, 0),
+        ("seq", "시퀀스길이", False, 0.05), ("mean", "평균등급", False, tol),
+        ("g0", "등급0 비율", False, tol), ("g4", "등급4 비율", False, tol)]:
+        cells = []
+        for yr in (2024, 2026):
+            sub = df[df.year == yr]
+            g = sub[ROI].to_numpy()
+            got = {"n_pat": sub["patient_id"].nunique(), "n_img": len(sub),
+                   "seq": len(sub) / max(sub["patient_id"].nunique(), 1),
+                   "mean": float(g.mean()), "g0": float((g == 0).mean()),
+                   "g4": float((g == 4).mean())}[key]
+            ref = REF_L1[yr][key]
+            ok = (got == ref) if is_cnt else (abs(got - ref) <= tl)
+            rec(ok, f"L1 {label} {yr}")
+            fmt = f"{ref}/{got}" if is_cnt else f"{ref:.3f}/{got:.3f}"
+            cells.append(f"{fmt}{'  OK' if ok else '  X'}")
+        print(f"  {label:<14}{cells[0]:>22}{cells[1]:>22}")
+    print("  (마르코프 전이비는 시퀀스 순서 컬럼 필요 → l1_structure.py 구현 시 추가)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tol", type=float, default=0.03, help="일치 허용오차 |Δ|")
+    ap.add_argument("--csv", default=CSV_DEFAULT, help="labels.csv 경로 (L1용)")
     args = ap.parse_args()
     TOL = args.tol
 
@@ -73,8 +114,14 @@ def main():
         (PASS if ok else FAIL).append(name)
 
     print("=" * 76)
-    print(f"check_value — draft §4.4 L3 기준값 대조 (TOL ±{TOL})")
-    print(f"  runs: {RUNS}")
+    print(f"check_value — draft 기준값 대조 (TOL ±{TOL})")
+    print("=" * 76)
+
+    # L1 먼저 — labels.csv 만으로 즉시 나옴(최속). L3 는 E0 학습 npz 필요.
+    check_l1(args.csv, rec, TOL)
+
+    print("\n" + "=" * 76)
+    print(f"[L3] 방향 반전 분해 (draft §4.4)   runs: {RUNS}")
     print("=" * 76)
 
     fwd_all = pooled_bias("2024to2026", None)
@@ -82,8 +129,8 @@ def main():
     if fwd_all is None or rev_all is None:
         print("  [SKIP] test_preds.npz 없음 — 먼저 E0 실행:")
         print("         python Experiment/E/e0_cross.py --seeds 42 1 2")
-        print("=" * 76)
-        sys.exit(0)
+        _summary(PASS, FAIL, TOL)
+        return
 
     # [표3] 전체 방향별 편향
     print("\n[표3] 전체 방향별 편향")
@@ -117,6 +164,10 @@ def main():
         print(f"  {roi}: fwd {fwd:+.3f}  rev {rev:+.3f}  → {'반전 OK' if ok else '반전아님 X'}")
         rec(ok, f"{roi} 부호반전")
 
+    _summary(PASS, FAIL, TOL)
+
+
+def _summary(PASS, FAIL, TOL):
     print("\n" + "=" * 76)
     print(f"결과: PASS {len(PASS)} · FAIL {len(FAIL)}  (TOL ±{TOL})")
     if FAIL:
