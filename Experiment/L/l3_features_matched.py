@@ -21,7 +21,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "E"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # 같은 폴더 L3_features
 import e_common as A
-import L3_features as L               # features(), l3_explain(), R4 재사용
+import l3_features as L               # features(), l3_explain(), R4 재사용
 
 IMG_ORIG = r"D:\MICCAI2026\inhauh\image_original"
 

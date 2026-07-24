@@ -82,11 +82,13 @@ for rel, name in [
 
 # ─────────────────────────────────────────────────────────────
 print("\n" + "=" * 72)
-print("STEP 2 — 미포팅 추출기 구문검사 (3, 서버 데이터로 포팅 예정)")
+print("STEP 2 — 미구현/미포팅 L·A 코드 구문검사 (서버 데이터로 구현 예정)")
 print("=" * 72)
 for rel in ["Experiment/A/recompute_bestval.py",
-            "Experiment/L/L3_features.py",
-            "Experiment/L/L3_features_matched.py"]:
+            "Experiment/L/l3_features.py",
+            "Experiment/L/l3_features_matched.py",
+            "Experiment/L/l1_structure.py",
+            "Experiment/L/l4_reproducibility.py"]:
     check(f"syntax {Path(rel).name}",
           lambda rel=rel: ast.parse((REPO / rel).read_text(encoding="utf-8")))
 
