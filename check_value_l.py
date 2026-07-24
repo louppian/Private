@@ -3,7 +3,7 @@ r"""
 check_value_l.py — L 증거 사다리 값이 draft md(§4) 기준과 일치하는지 검증.
 
   L1 구조·분포 (§4.2 표1)   : labels.csv 만으로 즉시 (학습·이미지 불필요, 최속)
-  L2 라벨-영상 정합 (§4.3 표2): ROI 3→4 경계 AUC   → roi_features 포팅 후
+  L2 라벨-영상 정합 (§4.3 표2): ROI 3→4 경계 AUC   → l2_label_image 실행 후
   L3 방향 반전 분해 (§4.4 표3/4): E1 npz 의 δ/γ
   L4 재현성 (§4.5 표5)       : 자기일치·κ           → l4_reproducibility 구현 후
 
@@ -78,7 +78,7 @@ def check_l2(rec, tol):
     print("\n" + "=" * 76); print("[L2] 라벨-영상 정합 3→4 AUC (§4.3 표2)"); print("=" * 76)
     src = RESULT_L / "l2_auc.csv"
     if not src.exists():
-        print(f"  [SKIP] {src} 없음 — roi_features.py 포팅·실행 후 대조"); return
+        print(f"  [SKIP] {src} 없음 — l2_label_image.py 실행 후 대조"); return
     got = pd.read_csv(src)  # 기대 컬럼: year, roi, auc
     for yr in (2024, 2026):
         for roi in ROI:

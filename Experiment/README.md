@@ -51,10 +51,10 @@ A는 실험이 아니라 **E 산출물로 검증하는 가정**이라 번호별 
 
 | 라벨 | 계산 | 코드 | 상태 |
 |---|---|---|---|
-| **L0–L1** 구조·분포 | 매칭불일치·split 누수(=0), 시퀀스길이 MWU, 등급분포, 마르코프 전이 방향비 | `L/l1_structure.py` | stub |
-| **L2** 라벨-영상 정합 | ROI 16-특징 배터리(1차4+GLRLM6+GLSZM6), 인접등급 방향무관 AUC, 순열 max 보정 (모델 배제) | `L/roi_features.py` | 있음 |
-| **L3** 방향반전 분해 | fwd/rev bias, ROI δ(라벨)/γ(모델) 분해, 환자 부트스트랩 CI, confusion (모델 예측) | `L/l3_features.py`, `L/l3_features_matched.py` + `E/e_common.py:decompose` | 있음 |
-| **L4** 재현성 | 자기일치 ACC, weighted κ, 모델-판독자 일치, Wilcoxon (κ 역설) | `L/l4_reproducibility.py` | stub |
+| **L0–L1** 구조·분포 | 환자·영상수, 시퀀스길이, 등급분포 (labels.csv) | `L/l1_structure.py` | ✅ 구현 |
+| **L2** 라벨-영상 정합 | ROI **16-특징**(1차4 + GLRLM6 + GLSZM6, 텍스처 직접구현), 인접등급 방향무관 AUC (모델 배제) | `L/l2_label_image.py` | ✅ 구현 |
+| **L3** 방향반전 분해 | fwd/rev bias, ROI δ(라벨)/γ(모델) 분해, 환자 부트스트랩 CI (모델 예측) | `L/l3_features.py` + `E/e_common.py:decompose` | ⚠ 학습 의존 |
+| **L4** 재현성 | 자기일치 ACC, weighted κ, Wilcoxon (κ 역설) | `L/l4_reproducibility.py` | ✅ 구현(재측정 데이터 대기) |
 | 집계 | 위 레벨 표 → CSV | `L/summary.py` → `Result/L/` |
 
 파일명은 파이썬 관례대로 **소문자** 통일(`e*`, `l*`). 폴더는 축 라벨이라 대문자 `A/L/E`.
@@ -85,9 +85,10 @@ python Experiment/E/summary.py
 | Δg ≠ 0, E2 정합 후 소멸 | 조건부 | 수축분 제거 후 사용 | 대체로 유지 |
 | Δg ≠ 0, E2 후 잔존 | 위반 | δ_corr = δ_obs + Δg/2 | 잔존 δ 만큼만 주장 |
 
-## 미포팅 (서버 데이터로 구현·검증 예정)
+## 미포팅 / 대기
 
-- `A/recompute_bestval.py`, `L/l3_features.py`, `L/l3_features_matched.py` — 구버전 base API
-  (`raw_path_from_npz`·`build_2026_cache`·`InhaUHMaskDataset`·`load_mae_ckpt_to_512`·`evaluate`)를
-  core API(`DorgaMaskDataset`·`load_mrm_vit`·`evaluate_dorga`·사전정렬 디스크 read)로 치환 필요.
-- `L/l1_structure.py`, `L/l4_reproducibility.py` — 신규 stub, 서버 라벨로 구현.
+- **학습 의존(L3·A1)**: `L/l3_features.py`, `L/l3_features_matched.py`, `A/recompute_bestval.py` —
+  구버전 base API(`raw_path_from_npz`·`build_2026_cache`·`InhaUHMaskDataset`·`evaluate`)를
+  core API로 치환 + E1 cross 산출 필요.
+- **L1·L2·L4 는 학습 불필요 — 서버에서 바로 실행**: `l1_structure.py`(labels.csv),
+  `l2_label_image.py`(images+masks), `l4_reproducibility.py`(판독자 재측정 CSV `--rr` 필요).
