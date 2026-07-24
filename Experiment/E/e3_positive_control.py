@@ -70,7 +70,6 @@ def main():
     ap.add_argument("--betas", type=float, nargs="+", default=[0.0, 0.25, 0.5, 1.0])
     ap.add_argument("--reps", type=int, nargs="+", default=[42, 1, 2])
     ap.add_argument("--half_seed", type=int, default=0)
-    ap.add_argument("--epochs", type=int, default=50)
     args = ap.parse_args()
 
     root = A.A1_OUT / "E3"
@@ -78,7 +77,7 @@ def main():
     H1, H2 = two_halves(df, args.year, args.half_seed)
     cache = A.build_full_2026_cache() if args.year == 2026 else A.EMPTY_CACHE
 
-    curve = [run_beta(args.year, H1, H2, b, args.reps, args.epochs, cache, root) for b in args.betas]
+    curve = [run_beta(args.year, H1, H2, b, args.reps, A.B.EPOCHS, cache, root) for b in args.betas]
 
     # 복원곡선 선형회귀 (β → δ): 기울기·절편
     bs = np.array([c["beta"] for c in curve]); ds = np.array([c["delta_mean"] for c in curve])

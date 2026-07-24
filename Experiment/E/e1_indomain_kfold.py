@@ -63,7 +63,6 @@ def main():
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--fold_seed", type=int, default=0)
     ap.add_argument("--init_seeds", type=int, nargs="+", default=[42, 1, 2])
-    ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--years", type=int, nargs="+", default=[2024, 2026])
     args = ap.parse_args()
 
@@ -74,7 +73,7 @@ def main():
     out = {}
     for y in args.years:
         out[str(y)] = run_cohort(y, args.folds, args.fold_seed, args.init_seeds,
-                                  args.epochs, cache, root)
+                                  A.B.EPOCHS, cache, root)
 
     # A1 검정: Δg = g_2024 - g_2026 (overall + ROI별)
     if "2024" in out and "2026" in out:

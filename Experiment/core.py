@@ -86,8 +86,9 @@ PROJ_DIM     = 768
 BATCH_SIZE   = 32
 FREEZE_BLOCKS = 6         
 VAL_FRAC     = 0.10          # train:val = 9:1
+EPOCHS       = 50            # 고정: 무조건 50 에폭 (전 실험 공통, override 없음)
 TAIL_EPOCHS  = 5
-EARLYSTOP_PATIENCE = 10
+EARLYSTOP_PATIENCE = 10      # 고정: early-stop patience 10 (전 실험 공통)
 NORM_MEAN, NORM_STD = [0.56], [0.17]
 DEVICE       = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -618,7 +619,6 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="+", default=DEFAULT_MODELS, choices=DEFAULT_MODELS)
     ap.add_argument("--seeds", type=int, nargs=3, default=DEFAULT_SEEDS)
-    ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--keep-staging", action="store_true")
     ap.add_argument("--mrm", default=None, help="DORGA 백본(MRM) 경로 (기본 CONFIG)")
@@ -653,9 +653,9 @@ def main():
                     manifest[key] = {**meta, "skipped": True, **_load_result(run_dir)}
                     continue
                 print("\n" + "=" * 78)
-                print(f"[train] {key}  mode={mode} seed={seed} (epochs={args.epochs}, best_val)")
+                print(f"[train] {key}  mode={mode} seed={seed} (epochs={EPOCHS} 고정, best_val)")
                 print("=" * 78)
-                train_arm(model, mode, seed, args.epochs, stage_root)
+                train_arm(model, mode, seed, EPOCHS, stage_root)
                 src = run_dir / ckpt_file
                 if not src.exists():
                     raise FileNotFoundError(f"{src} 없음. {ckpt_file} 저장 실패.")

@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 r"""
-temp.py — 병합/재배선 서버 검증 하네스
+check_file.py — 병합/재배선 파일·구조 검증 하네스
 
 목적: npjDM2026 → Private 병합 후 Model(순수 모델) / Experiment(core·드라이버) 배치가
 실제 서버 데이터(labels.csv·images_normalize·masks·MRM)로 끝까지 도는지 단계별 확인.
 
 실행:
     cd <repo 루트>        # 예: /shared/home/mai/JeongGeon/Private
-    python temp.py
+    python check_file.py
 
 동작:
   STEP1  학습·집계 모듈 12개 import (offline 가능)

@@ -20,13 +20,12 @@ import e_common as A
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, nargs="+", default=[42, 1, 2])
-    ap.add_argument("--epochs", type=int, default=50)
     args = ap.parse_args()
 
     root = A.A1_OUT / "E" / "runs" / "dorga"    # checkpoint/E/runs/dorga (summary.py 입력 규약)
     for mode in ["2024to2026", "2026to2024"]:   # 미등록 mode → core 원래 교차 split 로 fallback
         for s in args.seeds:
-            A.B.train_arm("dorga", mode, s, args.epochs, root)
+            A.B.train_arm("dorga", mode, s, A.B.EPOCHS, root)
     print("E0 완료:", root)
 
 

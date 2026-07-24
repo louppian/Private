@@ -57,7 +57,6 @@ def main():
     ap.add_argument("--fracs", type=float, nargs="+", default=[1.0, 0.5, 0.25])
     ap.add_argument("--reps", type=int, nargs="+", default=[42, 1, 2])
     ap.add_argument("--half_seed", type=int, default=0)
-    ap.add_argument("--epochs", type=int, default=50)
     args = ap.parse_args()
 
     root = A.A1_OUT / "E4"
@@ -65,7 +64,7 @@ def main():
     H1, H2 = two_halves(df, args.year, args.half_seed)
     cache = A.build_full_2026_cache() if args.year == 2026 else A.EMPTY_CACHE
 
-    curve = [run_frac(args.year, H1, H2, f, args.reps, args.epochs, cache, root) for f in args.fracs]
+    curve = [run_frac(args.year, H1, H2, f, args.reps, A.B.EPOCHS, cache, root) for f in args.fracs]
     out = dict(year=int(args.year), n_H1=len(H1), n_H2=len(H2), curve=curve,
                note="참 δ=0. frac↓ 일수록 δ_spurious 가 0 에서 벗어나면 A1 위반이 δ 로 누출됨을 뜻함.")
 

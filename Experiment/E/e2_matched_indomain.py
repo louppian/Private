@@ -67,7 +67,6 @@ def main():
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--match_seed", type=int, default=0)
     ap.add_argument("--init_seeds", type=int, nargs="+", default=[42, 1, 2])
-    ap.add_argument("--epochs", type=int, default=50)
     args = ap.parse_args()
 
     root = A.A1_OUT / "E2"
@@ -77,8 +76,8 @@ def main():
 
     keys = ["overall"] + list(A.ROI)
     out = {"matched_n": {"2024": len(keep24), "2026": len(keep26)}}
-    out["2024"] = run_cohort_matched(2024, keep24, args.folds, args.match_seed, args.init_seeds, args.epochs, cache, root)
-    out["2026"] = run_cohort_matched(2026, keep26, args.folds, args.match_seed, args.init_seeds, args.epochs, cache, root)
+    out["2024"] = run_cohort_matched(2024, keep24, args.folds, args.match_seed, args.init_seeds, A.B.EPOCHS, cache, root)
+    out["2026"] = run_cohort_matched(2026, keep26, args.folds, args.match_seed, args.init_seeds, A.B.EPOCHS, cache, root)
 
     a1 = {}
     for key in keys:

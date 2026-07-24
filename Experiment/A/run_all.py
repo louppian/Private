@@ -21,16 +21,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import e_common as A
 
 HERE = Path(__file__).parent
+E_DIR = HERE.parent / "E"                      # E0~E4 드라이버 위치(폴더 분리 후)
 # 기존 실데이터 방향반전 run 루트 (draft §4.5) — δ_obs 추출용.
 # seed 쌍(2024to2026_s* / 2026to2024_s*)이 가장 많은 run 디렉터리를 자동 선택.
 BIAS_RUNS = r"D:\InhaUH_CXR\2026.05 CXRs\dorga_bias_direction_runs"
 
 
-def run_step(script, extra):
-    cmd = [sys.executable, str(HERE / script), *map(str, extra)]
+def run_step(script, extra=()):
+    cmd = [sys.executable, str(E_DIR / script), *map(str, extra)]
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}  # cp949 콘솔 크래시 방지
     print(f"\n$ {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=str(HERE), check=True, env=env)
+    subprocess.run(cmd, cwd=str(E_DIR), check=True, env=env)
 
 
 def _pairs_in(run):
@@ -149,7 +150,6 @@ def verdict(epochs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--only", nargs="+", default=["E3", "E0", "E1", "E2", "E4"],
                     choices=["E0", "E3", "E1", "E2", "E4"])
     ap.add_argument("--verdict_only", action="store_true")
@@ -157,14 +157,13 @@ def main():
 
     if not args.verdict_only:
         order = [s for s in ["E3", "E0", "E1", "E2", "E4"] if s in args.only]
+        script = {"E3": "e3_positive_control.py", "E0": "e0_cross.py",
+                  "E1": "e1_indomain_kfold.py", "E2": "e2_matched_indomain.py",
+                  "E4": "e4_negative_control.py"}
         for step in order:
-            if step == "E3": run_step("e3_positive_control.py", ["--epochs", args.epochs])
-            if step == "E0": run_step("e0_cross.py",            ["--epochs", args.epochs])
-            if step == "E1": run_step("e1_indomain_kfold.py",   ["--epochs", args.epochs])
-            if step == "E2": run_step("e2_matched_indomain.py", ["--epochs", args.epochs])
-            if step == "E4": run_step("e4_negative_control.py", ["--epochs", args.epochs])
+            run_step(script[step])                     # epochs 고정(50) → 인자 없음
 
-    verdict(args.epochs)
+    verdict(A.B.EPOCHS)
 
 
 if __name__ == "__main__":
