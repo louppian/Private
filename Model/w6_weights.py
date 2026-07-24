@@ -83,7 +83,7 @@ IMG_SIZE     = 512
 R, C, K      = 4, 5, 7
 PROJ_DIM     = 768
 BATCH_SIZE   = 32
-FREEZE_BLOCKS = 6          # 동결 없음 — 백본 전체 학습(1e-5) + 헤드(1e-4)
+FREEZE_BLOCKS = 6         
 VAL_FRAC     = 0.10          # train:val = 9:1
 TAIL_EPOCHS  = 5
 EARLYSTOP_PATIENCE = 10
