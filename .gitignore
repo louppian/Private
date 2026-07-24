@@ -1,7 +1,16 @@
+# ── 데이터셋 (외부·대용량) ──
 /CXR
-/Model/BSNet/checkpoints
-/Model/checkpoints
-/Model/SegSTN/weights
+
+# ── 학습 가중치 (재생성 가능, 76GB) — 위치 불문 전역 무시 ──
+*.pth
+*.pt
+*.ckpt
+
+# ── 실험 산출: 가중치 + raw run(json/npz) 은 checkpoint/ 에만, git 제외 ──
+/checkpoint/
+/Model/w6_out/
+/w6_out/
+
+# ── 캐시 ──
 **/__pycache__/
 *.pyc
-/w6_out

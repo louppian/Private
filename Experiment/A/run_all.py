@@ -1,0 +1,171 @@
+# -*- coding: utf-8 -*-
+r"""
+run_all — A1 검증 전체 오케스트레이션 + 최종 판정   [A1_검증실험계획 §6·§7]
+
+순서(계획 §7): E3(추정기 검증) → E1(실데이터) → E2(분포정합) → E4(음성대조) → 판정.
+각 E 는 별도 프로세스로 실행(arm 간 GPU 메모리 격리). 마지막에 δ 보정·판정표를 낸다.
+
+δ 보정식:  δ_corr = δ_obs - (g_r - g_f)/2 = δ_obs + Δg/2
+  - g_f = 2024 학습 모델오차 ≈ g_2024,  g_r = 2026 학습 ≈ g_2026  (E1 in-domain)
+  - Δg = g_2024 - g_2026  → (g_r-g_f)/2 = -Δg/2
+  - E1 Δg(raw)·E2 Δg(matched) 둘로 각각 보정치를 낸다(matched 가 수축 제거본).
+
+실행:  python run_all.py --epochs 50                 # 전체
+       python run_all.py --only E1 E2                # 일부만
+       python run_all.py --verdict_only             # 학습 없이 판정만(요약 json 존재 시)
+"""
+import argparse, json, subprocess, sys, glob, os
+from pathlib import Path
+import numpy as np
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "E"))
+import e_common as A
+
+HERE = Path(__file__).parent
+# 기존 실데이터 방향반전 run 루트 (draft §4.5) — δ_obs 추출용.
+# seed 쌍(2024to2026_s* / 2026to2024_s*)이 가장 많은 run 디렉터리를 자동 선택.
+BIAS_RUNS = r"D:\InhaUH_CXR\2026.05 CXRs\dorga_bias_direction_runs"
+
+
+def run_step(script, extra):
+    cmd = [sys.executable, str(HERE / script), *map(str, extra)]
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}  # cp949 콘솔 크래시 방지
+    print(f"\n$ {' '.join(cmd)}")
+    subprocess.run(cmd, cwd=str(HERE), check=True, env=env)
+
+
+def _pairs_in(run):
+    pairs = []
+    for fwd in glob.glob(os.path.join(run, "2024to2026_s*", "test_preds.npz")):
+        s = Path(fwd).parent.name.split("_s")[-1]
+        rev = os.path.join(run, f"2026to2024_s{s}", "test_preds.npz")
+        if os.path.exists(rev):
+            pairs.append((fwd, rev, s))
+    return pairs
+
+def _cross_seed_pairs():
+    """δ_obs 소스 선택: E0(동일 early-stop 규약) 우선, 없으면 기존 bias run 중 seed 최다."""
+    e0 = _pairs_in(str(A.A1_OUT / "E0"))
+    if e0:
+        return e0, "E0(early-stop 규약)"
+    best, src = [], None
+    for run in sorted(glob.glob(os.path.join(BIAS_RUNS, "*"))):
+        p = _pairs_in(run)
+        if len(p) > len(best):
+            best, src = p, f"{os.path.basename(run)}(50ep no-stop)"
+    return best, src
+
+
+def observed_delta():
+    """cross run 에서 δ_obs(라벨성분, 보정 전) 를 seed 평균으로 ROI별 계산."""
+    import numpy as np
+    pairs, src = _cross_seed_pairs()
+    if not pairs:
+        return None
+    keys = ["overall"] + list(A.ROI)
+    accD = {k: [] for k in keys}; accS = {k: [] for k in keys}
+    for fwd, rev, s in pairs:
+        for k in keys:
+            roi = None if k == "overall" else k
+            d = A.decompose(fwd, rev, roi=roi, seed=int(s) if s.isdigit() else 0)
+            accD[k].append(d["delta"]); accS[k].append(d["s"])
+    out = {k: dict(delta=float(np.mean(accD[k])), s=float(np.mean(accS[k])),
+                   n_seed=len(accD[k])) for k in keys}
+    out["_source"] = src
+    return out
+
+
+def verdict(epochs):
+    e1 = json.loads((A.A1_OUT / "E1" / "E1_summary.json").read_text(encoding="utf-8")) \
+        if (A.A1_OUT / "E1" / "E1_summary.json").exists() else None
+    e2 = json.loads((A.A1_OUT / "E2" / "E2_summary.json").read_text(encoding="utf-8")) \
+        if (A.A1_OUT / "E2" / "E2_summary.json").exists() else None
+    e3 = json.loads((A.A1_OUT / "E3" / "E3_summary.json").read_text(encoding="utf-8")) \
+        if (A.A1_OUT / "E3" / "E3_summary.json").exists() else None
+    e4 = json.loads((A.A1_OUT / "E4" / "E4_summary.json").read_text(encoding="utf-8")) \
+        if (A.A1_OUT / "E4" / "E4_summary.json").exists() else None
+
+    dg_raw_map     = e1["A1_test"]         if e1 and "A1_test" in e1 else {}          # {key:{delta_g,..}}
+    dg_matched_map = e2["A1_test_matched"] if e2 and "A1_test_matched" in e2 else {}
+    dobs = observed_delta()
+
+    dobs_roi = {k: v for k, v in dobs.items() if k != "_source"} if dobs else {}
+    V = {"E1_delta_g": {k: v["delta_g"] for k, v in dg_raw_map.items()},
+         "E2_delta_g_matched": {k: v["delta_g"] for k, v in dg_matched_map.items()},
+         "E3_recovery_slope": e3.get("recovery_slope") if e3 else None,
+         "E4_leakage": [(c["train_frac"], c["delta_spurious"]) for c in e4["curve"]] if e4 else None,
+         "delta_obs_source": dobs.get("_source") if dobs else None,
+         "delta_obs": {k: v["delta"] for k, v in dobs_roi.items()},
+         "delta_corrected": {}}
+
+    # δ_corr[roi] = δ_obs[roi] + Δg[roi]/2  (ROI별 raw·matched 각각)
+    if dobs_roi:
+        for k, v in dobs_roi.items():
+            row = {"delta_obs": v["delta"]}
+            dgr = dg_raw_map.get(k, {}).get("delta_g")
+            dgm = dg_matched_map.get(k, {}).get("delta_g")
+            if dgr is not None:
+                row["corr_E1raw"] = v["delta"] + dgr / 2
+            if dgm is not None:
+                row["corr_E2matched"] = v["delta"] + dgm / 2
+            V["delta_corrected"][k] = row
+
+    # 판정 요약 문장
+    lines = ["=" * 78, "  A1 검증 최종 판정", "=" * 78]
+    if e3:
+        s = e3.get("recovery_slope")
+        lines.append(f"[E3 양성대조] 복원 기울기 {s:+.3f} (이상 1.0) — "
+                     + ("추정기 신뢰 가능" if s is not None and 0.8 <= s <= 1.2 else "추정기 편향 점검 필요"))
+    if "overall" in dg_raw_map:
+        t = dg_raw_map["overall"]
+        lines.append(f"[E1 실데이터] Δg(raw,overall) {t['delta_g']:+.4f} CI [{t['ci'][0]:+.4f},{t['ci'][1]:+.4f}] — "
+                     + ("A1 위반 신호" if t["reject_A1"] else "A1 기각 못함"))
+    if "overall" in dg_matched_map:
+        t = dg_matched_map["overall"]
+        lines.append(f"[E2 정합]    Δg(matched,overall) {t['delta_g']:+.4f} CI [{t['ci'][0]:+.4f},{t['ci'][1]:+.4f}] — "
+                     + ("진짜 비대칭 잔존(A1 위반)" if t["reject_A1"] else "정합 후 소멸(수축 기원)"))
+    if dg_raw_map:
+        lines.append("")
+        lines.append(f"{'ROI':<9}{'Δg raw':>10}{'Δg matched':>12}")
+        for k in ["overall"] + list(A.ROI):
+            r = dg_raw_map.get(k, {}).get("delta_g"); m = dg_matched_map.get(k, {}).get("delta_g")
+            lines.append(f"{k:<9}{(r if r is not None else float('nan')):>+10.3f}"
+                         f"{(m if m is not None else float('nan')):>+12.3f}")
+    if V["delta_corrected"]:
+        lines.append("")
+        lines.append(f"{'ROI':<9}{'δ_obs':>10}{'δ_corr(E1raw)':>16}{'δ_corr(E2matched)':>19}")
+        for k, row in V["delta_corrected"].items():
+            lines.append(f"{k:<9}{row['delta_obs']:>+10.3f}"
+                         f"{row.get('corr_E1raw', float('nan')):>+16.3f}"
+                         f"{row.get('corr_E2matched', float('nan')):>+19.3f}")
+        lines.append("")
+        lines.append("→ RB·LT 의 δ_corr 이 여전히 양(+)으로 크면 라벨 드리프트 결론 유지,")
+        lines.append("  0 근처로 붕괴하면 관측 δ 는 모델 방향비대칭의 산물이었음.")
+    txt = "\n".join(lines)
+    A.save_json(V, A.A1_OUT / "A1_verdict.json")
+    (A.A1_OUT / "A1_verdict.txt").write_text(txt, encoding="utf-8")
+    print("\n" + txt)
+    print("\nsaved:", A.A1_OUT / "A1_verdict.json", "/", A.A1_OUT / "A1_verdict.txt")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--epochs", type=int, default=50)
+    ap.add_argument("--only", nargs="+", default=["E3", "E0", "E1", "E2", "E4"],
+                    choices=["E0", "E3", "E1", "E2", "E4"])
+    ap.add_argument("--verdict_only", action="store_true")
+    args = ap.parse_args()
+
+    if not args.verdict_only:
+        order = [s for s in ["E3", "E0", "E1", "E2", "E4"] if s in args.only]
+        for step in order:
+            if step == "E3": run_step("e3_positive_control.py", ["--epochs", args.epochs])
+            if step == "E0": run_step("e0_cross.py",            ["--epochs", args.epochs])
+            if step == "E1": run_step("e1_indomain_kfold.py",   ["--epochs", args.epochs])
+            if step == "E2": run_step("e2_matched_indomain.py", ["--epochs", args.epochs])
+            if step == "E4": run_step("e4_negative_control.py", ["--epochs", args.epochs])
+
+    verdict(args.epochs)
+
+
+if __name__ == "__main__":
+    main()

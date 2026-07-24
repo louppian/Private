@@ -52,10 +52,11 @@ from torchvision import transforms
 from tqdm import tqdm
 
 # ── DORGA 모델·손실: Private repo 자립 코드 ──
-_HERE = os.path.dirname(os.path.abspath(__file__))          # Model
-_MODEL_ROOT = _HERE                                         # Model (BSNet/PAFE scorer 경로 기준)
-_DORGA_DIR = os.path.join(_HERE, "DORGA")                   # Model/DORGA (DORGA.py·scorer.py)
-for _p in (_MODEL_ROOT, _DORGA_DIR):
+_HERE = os.path.dirname(os.path.abspath(__file__))          # Experiment
+_REPO = os.path.dirname(_HERE)                              # Private repo 루트
+_MODEL_ROOT = os.path.join(_REPO, "Model")                 # Model (BSNet/PAFE scorer 경로 기준)
+_DORGA_DIR = os.path.join(_MODEL_ROOT, "DORGA")            # Model/DORGA (DORGA.py·scorer.py)
+for _p in (_HERE, _MODEL_ROOT, _DORGA_DIR):                # _HERE = Experiment (e_common 등 형제모듈)
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -72,7 +73,7 @@ IMG_DIR   = Path(f"{BASE}/CXR/Merged/images_normalize")   # ★ seg+STN 정렬 �
 MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks")              # ★ 정렬 마스크 <uid>.png
 CSV_PATH  = f"{BASE}/CXR/Merged/labels.csv"          # uid, patient_id, RT, LT, RB, LB, image_path, …
 MRM_W     = Path("/shared/home/mai/JeongGeon/IEEETMI/weight/DORGA_Brixia.pth")   # DORGA 백본
-OUT_ROOT  = Path(f"{BASE}/w6_out")                   # 산출물
+OUT_ROOT  = Path(_REPO) / "checkpoint" / "E"         # 산출물(가중치+raw) → checkpoint/E/ (gitignore)
 
 # ── 하이퍼파라미터 ──
 ROI          = ["RT", "LT", "RB", "LB"]              # labels.csv 컬럼 = 영역 순서

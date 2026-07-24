@@ -21,8 +21,10 @@ from pathlib import Path
 
 import numpy as np
 
-BASE = "/shared/home/mai/JeongGeon/Private"
-OUT_ROOT = Path(f"{BASE}/w6_out")
+_HERE = Path(__file__).resolve().parent          # Experiment/E
+_REPO = _HERE.parents[1]                          # Private repo 루트
+RUNS_DIR   = _REPO / "checkpoint" / "E" / "runs"  # 입력: core 산출 <model>/<mode>_s<seed>/results.json
+RESULT_DIR = _REPO / "Result" / "E"               # 출력: 집계 CSV (git 추적)
 ROI = ["RT", "LT", "RB", "LB"]
 DIR_LABEL = {"2024to2026": "fwd", "2026to2024": "rev"}
 MODELS = ["dorga", "bsnet", "pafe"]
@@ -51,7 +53,7 @@ def fmt(m, s):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--runs", default=str(OUT_ROOT / "runs"))
+    ap.add_argument("--runs", default=str(RUNS_DIR))
     args = ap.parse_args()
     runs_dir = Path(args.runs)
 
@@ -112,18 +114,18 @@ def main():
         v = f"  → {model}: 4개 영역 중 {n_flip}개에서 H_data 방향반전(fwd<0<rev)"
         print(v); verdict_lines.append(v)
 
-    # 저장
-    out_root = runs_dir.parent
-    csv_path = out_root / "summary.csv"
+    # 저장 → Result/E/ (git 추적)
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    csv_path = RESULT_DIR / "summary.csv"
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=["model", "roi", "fwd_bias_mean", "fwd_bias_sd",
                                           "rev_bias_mean", "rev_bias_sd", "flip_Hdata"])
         w.writeheader(); w.writerows(csv_rows)
-    (out_root / "verdict.txt").write_text("\n".join(verdict_lines), encoding="utf-8")
+    (RESULT_DIR / "verdict.txt").write_text("\n".join(verdict_lines), encoding="utf-8")
 
     print("\n" + "=" * 78)
     print(f"[save] {csv_path}")
-    print(f"[save] {out_root / 'verdict.txt'}")
+    print(f"[save] {RESULT_DIR / 'verdict.txt'}")
     print("해석: 특정 영역에서 3모델 모두 flip=YES 면, 아키텍처 무관한 라벨 드리프트(H_data) 근거.")
 
 
