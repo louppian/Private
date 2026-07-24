@@ -60,7 +60,7 @@ def main():
     args = ap.parse_args()
 
     root = A.A1_OUT / "E4"
-    df = pd.read_csv(A.MANIFEST)
+    df = A._prep(pd.read_csv(A.MANIFEST))         # year·patient 파생(two_halves 가 df.year 사용)
     H1, H2 = two_halves(df, args.year, args.half_seed)
     cache = A.build_full_2026_cache() if args.year == 2026 else A.EMPTY_CACHE
 

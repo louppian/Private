@@ -38,7 +38,7 @@ def fold_splitter(year, test_pat, seed, keep_pat=None):
 
 def run_cohort(year, folds, seed, init_seeds, root, keep_pat=None, tag="E2"):
     """한 코호트 K-fold × init_seeds → overall·ROI별 환자 bias 벡터(reps 평균)."""
-    df = pd.read_csv(A.MANIFEST)
+    df = A._prep(pd.read_csv(A.MANIFEST))         # year·patient 파생(labels.csv → 구 splitter 호환)
     if keep_pat is None:
         fold_list = A.kfold_patient_folds(df, year, folds, seed)
     else:
@@ -85,7 +85,7 @@ def main():
 
     root = A.A1_OUT / "E2"
     keys = ["overall"] + list(A.ROI)
-    df = pd.read_csv(A.MANIFEST)
+    df = A._prep(pd.read_csv(A.MANIFEST))         # match_two_cohorts 가 year·patient 사용
 
     # raw in-domain (전 환자) → Δg_raw
     raw24 = run_cohort(2024, args.folds, args.seed, args.init_seeds, root, tag="E2raw")
