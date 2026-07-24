@@ -51,15 +51,43 @@ def fmt(m, s):
     return f"{m:+.3f}±{s:.3f}" if not np.isnan(m) else "     -"
 
 
+def export_e2():
+    """checkpoint/E2/E2_summary.json → Result/E/e2_delta_g.csv (Δg_raw·matched·CI, git 추적)."""
+    e2p = _REPO / "checkpoint" / "E2" / "E2_summary.json"
+    if not e2p.exists():
+        return
+    e2 = json.loads(e2p.read_text(encoding="utf-8"))
+    raw, mat = e2.get("A1_test", {}), e2.get("A1_test_matched", {})
+    rows = []
+    for roi in ["overall"] + ROI:
+        r, m = raw.get(roi, {}), mat.get(roi, {})
+        ci = m.get("ci", [None, None]) or [None, None]
+        rows.append(dict(roi=roi,
+                         delta_g_raw=round(r["delta_g"], 4) if "delta_g" in r else "",
+                         delta_g_matched=round(m["delta_g"], 4) if "delta_g" in m else "",
+                         ci_lo=round(ci[0], 4) if ci[0] is not None else "",
+                         ci_hi=round(ci[1], 4) if ci[1] is not None else "",
+                         reject_A1_matched=int(m["reject_A1"]) if "reject_A1" in m else ""))
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    p = RESULT_DIR / "e2_delta_g.csv"
+    with open(p, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=["roi", "delta_g_raw", "delta_g_matched",
+                                          "ci_lo", "ci_hi", "reject_A1_matched"])
+        w.writeheader(); w.writerows(rows)
+    print(f"[save] {p}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", default=str(RUNS_DIR))
     args = ap.parse_args()
     runs_dir = Path(args.runs)
 
+    export_e2()                         # E2 Δg → Result/E/e2_delta_g.csv (cross 유무와 무관)
+
     recs = load_all(runs_dir)
     if not recs:
-        print(f"[중단] results.json 없음: {runs_dir}")
+        print(f"[중단] cross results.json 없음: {runs_dir} (E2 CSV 는 위에서 저장됨)")
         return
     print(f"[load] results.json {len(recs)}개  ({runs_dir})")
 
