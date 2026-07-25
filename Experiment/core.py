@@ -597,6 +597,16 @@ def _write_results(run_dir, name, mode, seed, TRAIN_Y, TEST_Y, df, epochs, best_
     (run_dir / "results.json").write_text(json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
     (run_dir / "history.json").write_text(json.dumps(hist, indent=1), encoding="utf-8")
     np.savez(run_dir / "test_preds.npz", preds=P, labels=Y, patients=test_patients)
+
+    # results·history 를 Result/ 에도 미러 (git 추적). 가중치·npz 는 checkpoint 에만.
+    try:
+        rel = Path(run_dir).resolve().relative_to((Path(_REPO) / "checkpoint").resolve())
+        rdir = Path(_REPO) / "Result" / rel
+        rdir.mkdir(parents=True, exist_ok=True)
+        (rdir / "results.json").write_text(json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
+        (rdir / "history.json").write_text(json.dumps(hist, indent=1), encoding="utf-8")
+    except Exception:
+        pass
     print(f"  ✔ final bias {bias:+.4f} | best_val_mae {best_val:.4f}@ep{best_epoch}")
 
 
