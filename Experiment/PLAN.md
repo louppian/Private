@@ -2,23 +2,22 @@
 
 영역 순서: **[RT, LT, RB, LB]** (전 실험 공통)
 
-## 0. 재현 기준(`D:\npjDM2026\draftv11.md`)과 내가 이탈한 점 — 잘못 기록
+## 0. 잘못 기록 — cross 에 matched 를 섞은 오류
 
-재현 대상은 draftv11.md §5.0 표다. 아래는 그 기준을 어긴 내 잘못이다.
+재현 대상은 `D:\npjDM2026\draftv11.md` §5.0 표다.
 
-1. **cross 에 matching 을 섞었다 (명백한 오류).** draftv11 §5.0: **Exp 1 cross(fwd/rev)는 raw 코호트**,
+1. **cross 에 matching 을 섞은 게 오류다.** draftv11 §5.0: **Exp 1 cross(fwd/rev)는 raw 코호트**,
    정합은 **Exp 2 in-domain(같은 해)에만** 들어간다. cross 의 평균회귀(RTM)는 matching 이 아니라
-   **Δγ 보정**(δ_corr = δ_obs + Δγ/2)이 흡수한다. 그런데 나는 `e1_cross.cross_val_fold_matched` 를
-   만들어 cross 에 정합을 붙였다 — 마크다운에 없는 단계다. (되돌려 제거함.)
-2. **Exp 1 cross 프로토콜을 바꿨다.** md 는 **raw cross · 방향별 seed 3회 · 원 recipe**
-   (VAL_FRAC 0.15 · 최종에폭 · early-stop 없음)인데, 나는 **val 5-fold · best_val · early-stop 10**
-   으로 바꿔 돌렸다. 재현 비교의 기준선을 어긴 것.
-3. **rev 불일치(+0.224 vs md +0.004)의 원인을 오판했다.** matched Δγ 는 작아(CI 0 포함) 보정해도
-   δ_corr≈δ_obs 이므로 **matching 은 rev 을 못 고친다.** 그런데 나는 이를 백본/matched 문제로
-   오래 쫓았다. 실제 문제는 **raw cross rev 자체가 md 의 raw cross rev 과 다른 것**이다.
+   **Δγ 보정**(δ_corr = δ_obs + Δγ/2)이 흡수한다. 그런데 `e1_cross.cross_val_fold_matched` 를
+   만들어 cross 에 정합을 붙였다 — 마크다운에 없는 단계다. (제거함. cross = raw 로 고정.)
+2. **rev 불일치(+0.224 vs md +0.004)를 matched/백본으로 오판했다.** matched Δγ 는 작아(CI 0 포함)
+   보정해도 δ_corr≈δ_obs 이므로 **matching 은 rev 을 못 고친다.** 실제 문제는 **raw cross rev 자체가
+   md 의 raw cross rev 과 다른 것**이다.
 
-**교정 기준:** cross = raw 고정. matching 은 Exp 2(in-domain)에서 Δγ 재는 용도로만. rev 재현은
-md Exp 1(raw · seed 3회 · 원 recipe)에 맞춰 비교한다.
+**유지(오류 아님):** **val 5-fold(8:2) 비중복은 우리 의도 설계**다 — best_val 의 val-운을 없애려는
+안정화. md 의 seed 3회와 방식만 다를 뿐 **둘 다 raw cross** 이며, 이건 이탈이 아니라 우리 설계 선택이다.
+
+**교정 기준:** cross = raw + val 5-fold 유지. matching 은 Exp 2(in-domain)에서 Δγ 재는 용도로만.
 
 ## 1. 데이터
 
