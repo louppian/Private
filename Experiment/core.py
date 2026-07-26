@@ -71,7 +71,7 @@ MERGED    = Path(f"{BASE}/CXR/Merged")               # labels.csv image_path 의
 IMG_DIR   = Path(f"{BASE}/CXR/Merged/images_normalize")   # ★ seg+STN 정렬 완료 이미지 <uid>.png
 MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks")              # ★ 정렬 마스크 <uid>.png
 CSV_PATH  = f"{BASE}/CXR/Merged/labels.csv"          # uid, patient_id, RT, LT, RB, LB, image_path, …
-MRM_W     = Path("/shared/home/mai/JeongGeon/IEEETMI/weight/DORGA_Brixia.pth")   # DORGA 백본
+MRM_W     = Path("/shared/home/mai/JeongGeon/IEEETMI/weight/MRM.pth")   # ★ 백본 사전학습(MAE/MRM). 서버 실경로 확인 필요
 OUT_ROOT  = Path(_REPO) / "checkpoint" / "E"         # 산출물(가중치+raw) → checkpoint/E/ (gitignore)
 
 # ── 하이퍼파라미터 ──
@@ -110,16 +110,57 @@ def set_seed(s):
 # DORGA 백본 로더 (timm ViT + 체크포인트 vit. 키, 인라인)
 # ═══════════════════════════════════════════════════════════
 def load_mrm_vit(mrm_path, num_classes=C, in_chans=1):
+    r"""MAE/MRM 사전학습(224·3ch)을 512·1ch ViT 로 정상 로드.
+    원본 C:\Code\DORGA/dorga/models/backbone.py 의 load_mae_ckpt_to_512 이식:
+      ① ckpt['model'] 언랩(MRM 포맷) ② patch_embed 3→1ch(mean) ③ pos_embed 224→512 bicubic 보간.
+    DORGA_Brixia.pth(vit. 접두어 전체 체크포인트)도 백본만 추출해 함께 지원.
+    (구 버전은 ①~③ 이 빠져 MRM.pth 가 missing=152 로 랜덤 초기화되던 버그가 있었다.)"""
     vit = vit_base_patch16_512(num_classes=num_classes, in_chans=in_chans,
                                drop_path_rate=0.1, global_pool="avg")
     ck = torch.load(str(mrm_path), map_location="cpu", weights_only=False)
-    sd = ck["state_dict"] if isinstance(ck, dict) and "state_dict" in ck else ck
-    vit_sd = {k.replace("vit.", ""): v for k, v in sd.items() if k.startswith("vit.")}
-    if not vit_sd:
-        vit_sd = dict(sd)
-    vit_sd.pop("head.weight", None); vit_sd.pop("head.bias", None)
-    m, u = vit.load_state_dict(vit_sd, strict=False)
+
+    # ① 래퍼 언랩: MRM 은 ck['model'], 일부는 ck['state_dict'], 나머지는 bare
+    if isinstance(ck, dict) and "model" in ck:
+        state = dict(ck["model"])
+    elif isinstance(ck, dict) and "state_dict" in ck:
+        state = dict(ck["state_dict"])
+    else:
+        state = dict(ck)
+    # DORGA 전체 체크포인트(vit. 접두어)면 백본 서브웨이트만 추출
+    vit_keys = {k[len("vit."):]: v for k, v in state.items() if k.startswith("vit.")}
+    if vit_keys:
+        state = vit_keys
+
+    # ② patch_embed 채널 적응 (3ch→1ch mean, 또는 1ch→3ch repeat)
+    key = "patch_embed.proj.weight"
+    if key in state and state[key].shape != vit.patch_embed.proj.weight.shape:
+        w_ck = state[key]; cin_ck, cin_mod = w_ck.shape[1], vit.patch_embed.proj.weight.shape[1]
+        if cin_ck == 3 and cin_mod == 1:
+            state[key] = w_ck.mean(1, keepdim=True)
+        elif cin_ck == 1 and cin_mod == 3:
+            state[key] = w_ck.repeat(1, 3, 1, 1)
+
+    # ③ pos_embed 그리드 보간 (224→512, cls 토큰 보존)
+    if "pos_embed" in state and state["pos_embed"].shape != vit.pos_embed.shape:
+        pe = state["pos_embed"]; cls, grid = pe[:, :1], pe[:, 1:]
+        gs_old = int(round(grid.shape[1] ** 0.5))
+        grid = grid.reshape(1, gs_old, gs_old, -1).permute(0, 3, 1, 2)
+        gs_new = vit.patch_embed.grid_size[0]
+        grid = F.interpolate(grid, size=(gs_new, gs_new), mode="bicubic", align_corners=False)
+        grid = grid.permute(0, 2, 3, 1).reshape(1, gs_new * gs_new, -1)
+        state["pos_embed"] = torch.cat([cls, grid], dim=1)
+
+    # head shape 불일치 제거 (분류 헤드는 downstream 에서 새로 학습)
+    if "head.weight" in state and state["head.weight"].shape != vit.head.weight.shape:
+        state.pop("head.weight", None); state.pop("head.bias", None)
+
+    m, u = vit.load_state_dict(state, strict=False)
     print(f"[backbone] MRM({Path(mrm_path).name}) loaded: missing={len(m)} unexpected={len(u)}")
+    # 사전학습 백본이 실제로 실렸는지 가드: 인코더 블록이 미로드면 즉시 실패
+    enc_missing = [k for k in m if k.startswith("blocks.") or k == "pos_embed" or k.startswith("patch_embed.")]
+    if enc_missing:
+        raise RuntimeError(f"백본 인코더 미로드 {len(enc_missing)}개(예: {enc_missing[:3]}). "
+                           f"체크포인트/경로 확인: {mrm_path}")
     return vit
 
 
