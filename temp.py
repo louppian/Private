@@ -3,9 +3,8 @@ r"""
 temp.py — rev 백본 스모크. 아래 MRM_PATH 에 백본 경로 붙여넣고  python temp.py.
 
 우리 계획 세팅 고정(val 5-fold split1~5 비중복 · best_val · 50ep · early-stop 10 · FREEZE 6),
-rev(2026→2024) 을 raw(전 환자)·matched(2024·2026 등급분포 정합) 두 조건으로 돌려 대조.
-  md rev +0.004  ·  현재 Brixia raw rev +0.224
-matched rev 이 raw보다 뚝 떨어져 ~0 이면 분포차(RTM)가 진범, 여전히 부풀면 백본/진짜 비대칭.
+백본만 교체해 rev(2026→2024) raw cross 를 split1~5 돌려 평균낸다. 비교 기준:
+  md rev +0.004  ·  현재 Brixia 백본 E1 rev +0.224
 """
 # ═══════════ 백본 경로 붙여넣기 (빈 문자열이면 core 기본 = DORGA_Brixia.pth) ═══════════
 MRM_PATH = ""
@@ -44,15 +43,15 @@ def run():
     ty, ey, tag = E.DIRS["rev"]                        # (2026, 2024, "26to24")
     root = A.A1_OUT / "E1_smoke" / bk
     print("#" * 78)
-    print(f"# rev MATCHED  백본={bk}  MRM={A.B.MRM_W}")
-    print(f"#   {tag} 정합: 2024·2026 등급분포 맞춘 환자만 · val 5-fold 비중복 · test 2024")
-    print(f"#   50ep · es10 · best_val · seed 1   (raw 는 이미 값 있음 — 안 돌림)")
+    print(f"# rev  백본={bk}  MRM={A.B.MRM_W}")
+    print(f"#   {tag}_split1~{SPLITS}: train 2026 80% / val 20% 비중복 / test 2024 전체 "
+          f"· 50ep · early-stop 10 · best_val · seed 1")
     print("#" * 78)
 
     per_split = []
     for k in range(SPLITS):
-        arm = f"{tag}_matched_split{k+1}"
-        A.register(arm, E.cross_val_fold_matched(ty, ey, k, folds=SPLITS))
+        arm = f"{tag}_split{k+1}"
+        A.register(arm, E.cross_val_fold(ty, ey, k, folds=SPLITS))   # raw cross, val fold k
         A.B.run_one_dorga(arm, 1, 50, root, arm=arm)                 # seed 1, 우리 세팅
         r = json.loads((root / arm / "results.json").read_text(encoding="utf-8"))
         per_split.append(dict(split=k + 1, overall=r["bias"],
@@ -60,14 +59,14 @@ def run():
     _m = lambda key: sum(s[key] for s in per_split) / len(per_split)
 
     print("\n" + "=" * 60)
-    print(f"rev MATCHED ({bk})  split별 overall/RB/LT")
+    print(f"rev ({bk})  split별 overall/RB/LT")
     for s in per_split:
         print(f"  split{s['split']}  overall {s['overall']:+.3f}  "
               f"RB {s['RB']:+.3f}  LT {s['LT']:+.3f}")
     print("-" * 60)
-    print(f"matched 평균  overall {_m('overall'):+.3f}  RB {_m('RB'):+.3f}  LT {_m('LT'):+.3f}")
-    print(f"기준          md rev +0.004  ·  Brixia raw rev +0.224  ·  MRM raw rev +0.138")
-    print("→ matched 가 ~0 으로 떨어지면 분포차(RTM)가 진범, 부풀면 백본/진짜 비대칭.")
+    print(f"rev ({bk})  5-split 평균  overall {_m('overall'):+.3f}  "
+          f"RB {_m('RB'):+.3f}  LT {_m('LT'):+.3f}")
+    print(f"기준             md rev +0.004  ·  Brixia rev +0.224")
     print("=" * 60)
 
 

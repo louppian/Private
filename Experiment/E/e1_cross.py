@@ -39,25 +39,6 @@ def cross_val_fold(train_year, test_year, k, folds=FOLDS):
     return _fn
 
 
-def cross_val_fold_matched(train_year, test_year, k, match_seed=0, folds=FOLDS):
-    """정합 cross: 두 코호트를 등급분포·환자수 맞춘 부분집합으로 제한 후 val 5-fold.
-    train·test 모두 matched 환자만 사용 → RTM(분포차) 비대칭 제거된 rev/fwd."""
-    def _fn(df, _seed):
-        df = df.copy(); df["split"] = None
-        keep24, keep26 = A.match_two_cohorts(df, match_seed)      # E2 와 동일 정합
-        keep = {2024: keep24, 2026: keep26}
-        ktrain, ktest = keep[train_year], keep[test_year]
-        tp = np.array(sorted(ktrain), dtype=object)
-        np.random.default_rng(0).shuffle(tp)
-        val = set(tp[k::folds])
-        m = (df["year"] == train_year) & df["patient"].isin(ktrain)
-        df.loc[m & df["patient"].isin(val), "split"] = "val"
-        df.loc[m & ~df["patient"].isin(val), "split"] = "train"
-        df.loc[(df["year"] == test_year) & df["patient"].isin(ktest), "split"] = "test"
-        return df[df.split.notna()].copy(), train_year, test_year
-    return _fn
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", nargs="+", default=["fwd", "rev"], choices=["fwd", "rev"])
