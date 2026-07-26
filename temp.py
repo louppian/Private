@@ -1,18 +1,27 @@
 # -*- coding: utf-8 -*-
 r"""
-temp.py — recipe 스모크: fwd·rev 를 따로 돌려 final / best_val / tail-5 로 rev·δ 비교.
+temp.py — 백본 가설 스모크 (우리 계획 실험 세팅 고정, 백본만 교체).
 
-목적: md(원 분석)는 EARLYSTOP=None(50 완주) + final/tail-5 → rev≈+0.004.
-      우리 best_val 규약과 어느 규약이 md 에 붙는지 확인.
+배경: recipe(final/best_val/tail5·early-stop)는 배제됨 — 어느 것도 rev 을 md(+0.004)로
+      못 내림. fwd(−0.233)는 md 와 완벽 일치, in-domain γ_2026(+0.014) 정상인데
+      **cross rev 만 +0.224**. 유일하게 남은 config 차이 = 백본:
+        md  = MRM.pth        (MAE 프리트레인 ViT)
+        우리 = DORGA_Brixia.pth (Brixia 학습 DORGA)  ← 등급 사전지식이 cross 비대칭 유발 의심.
 
-동작: --mode fwd|rev 로 한 방향씩 학습(50ep 고정, early-stop OFF=md).
-      --mode summary 로 학습 없이 fwd·rev 를 읽어 final·best_val·tail-5 δ 표 + md 대조.
-산출: checkpoint/E1_smoke/dorga/{24to26,26to24}_split1/  (실 E1 미간섭).
+세팅(고정, 우리 계획 그대로): E1 cross · val 5-fold(8:2, split1) · best_val reload ·
+      50ep · early-stop 10 · FREEZE 6 · lr enc1e-5/head1e-4.  **백본만 --mrm 로 교체.**
 
-실행(서버, 데이터·GPU 필요):
-  python temp.py --mode fwd
-  python temp.py --mode rev
-  python temp.py --mode summary   # δ 표 출력
+동작:
+  --mode fwd|rev  : 한 방향 학습(위 세팅 고정). --bk 라벨로 dorga_<bk>/ 에 저장.
+  --mode summary  : dorga_* 백본별 fwd/rev·δ_obs 를 md 와 대조.
+
+실행(서버):
+  python temp.py --mode fwd --bk brixia                          # 현재 백본
+  python temp.py --mode rev --bk brixia
+  python temp.py --mode fwd --bk mrm --mrm /path/to/MRM.pth      # md 백본
+  python temp.py --mode rev --bk mrm --mrm /path/to/MRM.pth
+  python temp.py --mode summary                                  # 백본별 rev·δ 비교
+산출: checkpoint/E1_smoke/dorga_<bk>/{24to26,26to24}_split1/  (실 E1 미간섭)
 """
 import argparse
 import json
@@ -31,52 +40,54 @@ for _p in (str(EXP), str(EXP / "E"), str(REPO / "Model"), str(REPO / "Model" / "
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import numpy as np
 import e_common as A          # noqa: E402
 import e1_cross as E          # noqa: E402  (cross_val_fold, DIRS)
 
-EPOCHS = 50                    # 고정 (md 완주)
-ROOT = A.A1_OUT / "E1_smoke" / "dorga"
+EPOCHS = 50
+SMOKE = A.A1_OUT / "E1_smoke"
+ROI = ["RT", "LT", "RB", "LB"]
+MD = {"fwd": -0.231, "rev": +0.004, "d_overall": +0.118,
+      "d": {"RT": .043, "LT": .138, "RB": .198, "LB": .091}}
 
 
-def recipe_biases(run_dir):
-    """history.json per-epoch test_bias → final / best_val / tail5 (overall bias)."""
-    if not (run_dir / "history.json").exists():
+def arm_bias(run_dir):
+    p = run_dir / "results.json"
+    if not p.exists():
         return None
-    hist = json.loads((run_dir / "history.json").read_text(encoding="utf-8"))
-    res = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
-    tb = [(h["epoch"], h["test_bias"]) for h in hist if "test_bias" in h]
-    if not tb:
-        return None
-    by_ep = dict(tb)
-    best_ep = res.get("best_val_epoch")
-    return {"final": tb[-1][1], "best_val": by_ep.get(best_ep, tb[-1][1]),
-            "tail5": float(np.mean([b for _, b in tb[-5:]])), "best_epoch": best_ep}
+    r = json.loads(p.read_text(encoding="utf-8"))
+    return {"overall": r["bias"], **{roi: r["per_roi"][roi]["bias"] for roi in ROI}}
 
 
 def summarize():
-    both = {m: recipe_biases(ROOT / f"{E.DIRS[m][2]}_split1") for m in ("fwd", "rev")}
-    missing = [m for m in ("fwd", "rev") if not both[m]]
-    if missing:
-        print(f"[대기] 먼저 학습:  " + "  ".join(f"python temp.py --mode {m}" for m in missing))
+    bks = sorted(d.name.replace("dorga_", "") for d in SMOKE.glob("dorga_*") if d.is_dir())
+    if not bks:
+        print("[대기] 먼저 학습: python temp.py --mode fwd --bk <name> [--mrm PATH] / --mode rev ...")
         return
     print("\n" + "=" * 78)
-    print("recipe 비교 (overall test bias, δ=(rev−fwd)/2)  · md: fwd −0.231 rev +0.004 δ +0.118")
+    print("백본별 방향편향·δ_obs  · md: fwd −0.231 rev +0.004 δ +0.118  (우리 세팅 고정)")
     print("=" * 78)
-    print(f"  {'recipe':<10}{'fwd':>10}{'rev':>10}{'δ_obs':>10}")
-    for rc in ("final", "best_val", "tail5"):
-        f, r = both["fwd"][rc], both["rev"][rc]
-        print(f"  {rc:<10}{f:>+10.3f}{r:>+10.3f}{(r - f) / 2:>+10.3f}")
-    print(f"\n  (best_val epoch: fwd {both['fwd']['best_epoch']} · rev {both['rev']['best_epoch']})")
-    print("  → rev 이 +0.004 에 가장 가까운 recipe = md 규약. 그걸로 core 확정.")
+    print(f"  {'backbone':<10}{'fwd':>9}{'rev':>9}{'δ_obs':>9}   {'RB δ':>8}{'(md .198)':>10}")
+    for bk in bks:
+        root = SMOKE / f"dorga_{bk}"
+        f = arm_bias(root / "24to26_split1")
+        r = arm_bias(root / "26to24_split1")
+        if not (f and r):
+            print(f"  {bk:<10}  (fwd·rev 둘 다 필요)")
+            continue
+        do = (r["overall"] - f["overall"]) / 2
+        drb = (r["RB"] - f["RB"]) / 2
+        print(f"  {bk:<10}{f['overall']:>+9.3f}{r['overall']:>+9.3f}{do:>+9.3f}   {drb:>+8.3f}")
+    print("\n  → rev 이 +0.004, δ_obs 가 +0.118, RB δ 가 +0.198 에 붙는 백본 = md. 그걸로 core.MRM_W 확정.")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", required=True, choices=["fwd", "rev", "summary"])
+    ap.add_argument("--bk", default="brixia", help="백본 라벨(출력 폴더 dorga_<bk>)")
+    ap.add_argument("--mrm", default=None, help="백본 체크포인트 경로(미지정 시 core.MRM_W)")
     args = ap.parse_args()
 
-    if args.mode == "summary":                        # 학습 없이 δ 표만
+    if args.mode == "summary":
         summarize()
         return
 
@@ -84,19 +95,22 @@ def main():
         print(f"[SKIP] 데이터 없음: {A.B.CSV_PATH} — 서버에서 실행")
         return
 
-    A.B.EARLYSTOP_PATIENCE = None                     # md 규약: early-stop OFF
+    if args.mrm:                                       # 백본만 교체(나머지 세팅 고정)
+        A.B.MRM_W = Path(args.mrm)
     ty, ey, tag = E.DIRS[args.mode]
     arm = f"{tag}_split1"
+    root = SMOKE / f"dorga_{args.bk}"
     A.register(arm, E.cross_val_fold(ty, ey, 0))
     print("\n" + "#" * 78)
-    print(f"# {args.mode}  {arm}  (train {ty} 80% / val 20% / test {ey} 전체)  epochs={EPOCHS}, early-stop OFF")
+    print(f"# {args.mode}  bk={args.bk}  MRM={A.B.MRM_W}")
+    print(f"#   {arm}: train {ty} 80% / val 20% / test {ey} 전체 · 50ep · early-stop 10 · best_val")
     print("#" * 78)
-    A.B.run_one_dorga(arm, 1, EPOCHS, ROOT, arm=arm)
+    A.B.run_one_dorga(arm, 1, EPOCHS, root, arm=arm)   # 우리 세팅(core 기본: early-stop 10, best_val)
 
-    b = recipe_biases(ROOT / arm)
-    print(f"\n[{args.mode}] final {b['final']:+.3f} · best_val {b['best_val']:+.3f}"
-          f"(ep {b['best_epoch']}) · tail5 {b['tail5']:+.3f}")
-    print("  → 둘 다 끝나면:  python temp.py --mode summary")
+    b = arm_bias(root / arm)
+    print(f"\n[{args.mode}/{args.bk}] overall {b['overall']:+.3f}  "
+          f"RB {b['RB']:+.3f}  LT {b['LT']:+.3f}  (md {args.mode} {MD[args.mode]:+.3f})")
+    print("  → 반대 방향도 돌린 뒤:  python temp.py --mode summary")
 
 
 if __name__ == "__main__":
