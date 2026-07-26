@@ -48,8 +48,10 @@ ROI      = B.ROI                 # ["RT","LT","RB","LB"]
 C        = B.C                   # 5
 MANIFEST = B.CSV_PATH            # labels.csv (uid, patient_id, RT,LT,RB,LB, image_path)
 DEVICE   = B.DEVICE
-A1_OUT   = Path(_REPO) / "checkpoint"        # A1 산출 루트 → checkpoint/{A,L,E}/ (gitignore)
+A1_OUT   = Path(_REPO) / "checkpoint"        # raw(가중치·npz) 루트 → checkpoint/ (gitignore)
 A1_OUT.mkdir(parents=True, exist_ok=True)
+RESULT_OUT = Path(_REPO) / "Result"          # json·summary 루트 → Result/ (git 추적)
+RESULT_OUT.mkdir(parents=True, exist_ok=True)
 
 # ── make_split 몽키패치: mode 이름 → 등록된 splitter ─────────────
 _ORIG_make_split = B.make_split
@@ -74,16 +76,6 @@ B.make_split = _dispatch
 def register(mode: str, fn):
     """mode 이름에 커스텀 splitter 를 건다. run_one(mode,...) 가 이걸 타게 된다."""
     _SPLITTERS[mode] = fn
-
-
-# ═══════════════════════════════════════════════════════════════
-# 2026 마스크 캐시 (in-domain2026·matched 등 2026 영상이 split 에 들어갈 때만 필요)
-# ═══════════════════════════════════════════════════════════════
-# core 는 사전정렬 images_normalize 를 디스크에서 읽으므로 2026 in-code 캐시가 불필요.
-def build_full_2026_cache():
-    return {}                     # 하위호환 no-op (舊 seg+STN 캐시 제거)
-
-EMPTY_CACHE: dict = {}            # 2024-only 실험용 (2026 영상 없음)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -158,15 +150,15 @@ def match_two_cohorts(df, seed, n_bins=5):
 # ═══════════════════════════════════════════════════════════════
 # 실행 래퍼 — 등록된 mode 로 B.run_one 호출
 # ═══════════════════════════════════════════════════════════════
-def run_arm(mode, splitter, seed, epochs, cache=None, root=None, model="dorga", arm=None):
-    """splitter 등록 후 core.train_arm 실행. cache 인자는 하위호환용(무시 — 사전정렬 디스크 로드).
+def run_arm(mode, splitter, seed, epochs, root=None, model="dorga", arm=None):
+    """splitter 등록 후 core.train_arm 실행 (core 가 사전정렬 이미지를 디스크에서 로드).
     arm 주면 run_dir 이름을 그걸로(미지정 시 {mode}_s{seed}). results dict(+ npz) 반환."""
     register(mode, splitter)
     root = Path(root)
     B.train_arm(model, mode, seed, epochs, root, arm=arm)
-    run_dir = root / (arm if arm else f"{mode}_s{seed}")
-    res = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
-    res["npz"] = str(run_dir / "test_preds.npz")
+    run_dir = root / (arm if arm else f"{mode}_s{seed}")     # checkpoint 하 arm 디렉터리
+    res = json.loads((B._result_dir(run_dir) / "results.json").read_text(encoding="utf-8"))  # json 은 Result
+    res["npz"] = str(run_dir / "test_preds.npz")             # npz 는 checkpoint
     return res
 
 
@@ -218,3 +210,64 @@ def save_json(obj, path):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(obj, indent=1, ensure_ascii=False), encoding="utf-8")
     return path
+
+
+# ═══════════════════════════════════════════════════════════════
+# in-domain Δg 공용 코어 — E2(raw 전 환자)·E3(matched 정합)가 공유
+#   in-domain(c→c) 은 라벨 오프셋 b_c 상쇄 → bias=g_c(순수 모델오차). Δg=g24−g26.
+# ═══════════════════════════════════════════════════════════════
+def indomain_fold_splitter(year, test_pat, seed, keep_pat=None):
+    """year in-domain splitter. keep_pat 주면 그 정합 부분집합 안에서만 train/val/test."""
+    def _fn(df, _seed):
+        keep = set(keep_pat) if keep_pat is not None else None
+        te = set(test_pat)
+        pool = np.array([p for p in _patients_of(df, year)
+                         if p not in te and (keep is None or p in keep)], dtype=object)
+        rng = np.random.default_rng(seed); rng.shuffle(pool)
+        n_val = max(2, int(round(len(pool) * B.VAL_FRAC)))     # 8:2 (core VAL_FRAC 단일 소스)
+        return _mark(df, pool[n_val:], pool[:n_val], test_pat, year), year, year
+    return _fn
+
+
+def run_cohort(year, folds, seed, init_seeds, root, keep_pat=None, tag="raw"):
+    """한 코호트 K-fold(전 환자 1회 test) × init_seeds → overall·ROI별 환자 bias 벡터."""
+    df = _prep(pd.read_csv(MANIFEST))
+    if keep_pat is None:
+        fold_list = kfold_patient_folds(df, year, folds, seed)
+    else:
+        pats = np.array([p for p in _patients_of(df, year) if p in set(keep_pat)], dtype=object)
+        rng = np.random.default_rng(seed); rng.shuffle(pats)
+        fold_list = [(k, pats[k::folds]) for k in range(folds)]
+    keys = ["overall"] + list(ROI)
+    bias_pat = {k: {} for k in keys}
+    Pall, Yall = [], []
+    for k, test_pat in fold_list:
+        for isd in init_seeds:
+            mode = f"{tag}_{year}_fold{k}"             # seed 는 core 가 _s{isd} 로 붙임
+            res = run_arm(mode, indomain_fold_splitter(year, test_pat, seed, keep_pat), isd, B.EPOCHS, root)
+            d = np.load(res["npz"], allow_pickle=True)
+            P, Y, pats_te = d["preds"], d["labels"], np.asarray(d["patients"])
+            Pall.append(P); Yall.append(Y)
+            for key in keys:
+                e = (P - Y).mean(axis=1) if key == "overall" \
+                    else (P[:, ROI.index(key)] - Y[:, ROI.index(key)]).astype(float)
+                for u in np.unique(pats_te):
+                    bias_pat[key].setdefault(u, []).append(float(e[pats_te == u].mean()))
+    P, Y = np.vstack(Pall), np.vstack(Yall)
+    out = {"year": int(year), "n_pat": len(bias_pat["overall"]),
+           "acc": float((P == Y).mean()), "mae": float(np.abs(P - Y).mean())}
+    for key in keys:
+        vec = np.array([np.mean(bias_pat[key][u]) for u in sorted(bias_pat[key])])
+        g, ci = mean_ci(vec, seed=seed)
+        out[key] = dict(g=g, ci=list(ci), vec=vec.tolist())
+    return out
+
+
+def a1_test(out24, out26, keys):
+    """Δg=g24−g26 (독립 두 코호트 환자 bias 벡터 평균차) + bootstrap CI + reject_A1."""
+    a1 = {}
+    for key in keys:
+        a, b = np.array(out24[key]["vec"]), np.array(out26[key]["vec"])
+        dg, dci = diff_ci(a, b, seed=0)
+        a1[key] = dict(delta_g=dg, ci=list(dci), reject_A1=bool(sig(dci)))
+    return a1

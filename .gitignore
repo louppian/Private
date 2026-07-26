@@ -9,7 +9,8 @@
 *.pt
 *.ckpt
 
-# ── 실험 산출: 가중치 + raw run(json/npz) 은 checkpoint/ 에만, git 제외 ──
+# ── 실험 산출: checkpoint/ = 가중치(.pth) + npz 만 (재생성 가능), git 제외 ──
+#    (json[results/history/summary]·CSV·A1_verdict 는 Result/ 에서 git 추적)
 /checkpoint/
 /Model/w6_out/
 /w6_out/

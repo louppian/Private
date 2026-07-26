@@ -12,7 +12,7 @@ L3 프록시 독립성 — 전처리 일치판 (2024 도 2026 과 동일한 seg+
       여전히 전 ROI 잔차면 → 전처리가 아니라 다른 전역 요인.
 
 실행: python L3_features_matched.py   (torch_ev + GPU)
-산출: runs/roi_features_matched.csv , runs/L3_matched_summary.txt
+산출: Result/L/roi_features_matched.csv , Result/L/L3_matched_summary.txt
 """
 import os, sys
 from pathlib import Path
@@ -56,7 +56,7 @@ def build_matched():
 
 def main():
     df = build_matched()
-    df.to_csv(A.A1_OUT / "roi_features_matched.csv", index=False, encoding="utf-8")
+    df.to_csv(A.RESULT_OUT / "L" / "roi_features_matched.csv", index=False, encoding="utf-8")
     Lm = ["L3 explained% — 전처리 일치판 (2024·2026 모두 seg+STN)",
           "낮을수록 잔차 지배(드리프트 신호). RB 만 낮고 나머지 회복되면 프록시 독립 확증.",
           f"{'특징':>6}" + "".join(f"{r:>9}" for r in L.R4)]
@@ -71,7 +71,7 @@ def main():
     Lm.append(f"\nn: 2024 {int((df.year==2024).sum())}장 / 2026 {int((df.year==2026).sum())}장 · "
               f"fallback {int(df.fallback.sum())}건")
     txt = "\n".join(Lm)
-    (A.A1_OUT / "L3_matched_summary.txt").write_text(txt, encoding="utf-8")
+    (A.RESULT_OUT / "L" / "L3_matched_summary.txt").write_text(txt, encoding="utf-8")
     print(txt)
 
 

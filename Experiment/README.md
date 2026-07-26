@@ -27,23 +27,24 @@ checkpoint/    가중치 + raw run(json/npz)      (❌ .gitignore, *.pth 전역 
 | 라벨 | 의미 | 코드 |
 |---|---|---|
 | **E1** | 실데이터 cross (2024↔2026) → δ_obs=(rev−fwd)/2 산출 | `E/e1_cross.py` |
-| **E2** | in-domain Δg (raw + 분포정합 matched 통합) → A1 검정 | `E/e2_indomain.py` |
-| **E3** | 반합성 양성대조 → 오프셋 β 복원곡선(추정기 무편향) | `E/e3_positive_control.py` |
-| **E4** | 반합성 음성대조 → 학습량 비대칭 δ 누출 정량화 | `E/e4_negative_control.py` |
-| 공용 | split·dataset·train·bootstrap·δ/γ 분해 | `E/e_common.py` + `core.py` |
-| 집계 | fwd/rev × 모델 × ROI bias 표 | `E/summary.py` → `Result/E/` |
+| **E2** | in-domain **raw** Δg_raw (전 환자) → A1 검정 | `E/e2_indomain_raw.py` |
+| **E3** | in-domain **matched** Δg_matched (등급분포 정합) | `E/e3_indomain_matched.py` |
+| **E4** | 반합성 양성대조 → 오프셋 β 복원곡선(추정기 무편향) | `E/e4_positive_control.py` |
+| **E5** | 반합성 음성대조 → 학습량 비대칭 δ 누출 정량화 | `E/e5_negative_control.py` |
+| 공용 | split·dataset·train·bootstrap·δ/γ 분해 + in-domain 코어 | `E/e_common.py` + `core.py` |
+| 집계 | fwd/rev × ROI bias, Δg 표 | `E/summary.py` → `Result/E1/e1_summary.csv` · `Result/E2/e2_summary.csv` · `Result/E3/e3_summary.csv` |
 
-E2 는 `raw`(전 환자, 舊 E1·부록 B)와 `matched`(등급분포 정합, 舊 E2·§5.2 본문)를 한 파일에서
-돌려 `Δg_raw → Δg_matched`(수축분 제거)까지 낸다. `--raw_only` 로 raw 만도 가능.
+E2(raw, 전 환자·舊 E1·부록 B)와 E3(matched, 등급분포 정합·舊 E2·§5.2 본문)를 분리해 각각
+`Δg_raw`·`Δg_matched` 를 낸다. 수축분 `Δg_raw − Δg_matched` 는 `run_all` 판정에서 대조.
 
 ### A — 식별가정 (draft §5)
 
-A는 실험이 아니라 **E 산출물로 검증하는 가정**이라 번호별 실험파일이 없다. A1 판정은 E1~E4를 돌려 수행.
+A는 실험이 아니라 **E 산출물로 검증하는 가정**이라 번호별 실험파일이 없다. A1 판정은 E1~E5를 돌려 수행.
 
 | 라벨 | 의미 | 코드 |
 |---|---|---|
-| **A1** | 오차 방향 대칭성 gᶠ=gʳ | `A/run_all.py`(E3→E1→E2→E4 판정), `A/recompute_bestval.py`(δ best_val 재산출) |
-| **A2** | 부분/완전 흡수 | 논문 논증 (E2 결과로 판정) |
+| **A1** | 오차 방향 대칭성 gᶠ=gʳ | `A/run_all.py`(E4→E1→E2→E3→E5 판정), `A/recompute_bestval.py`(δ best_val 재산출) |
+| **A2** | 부분/완전 흡수 | 논문 논증 (E3 정합 결과로 판정) |
 | **A3** | 코호트 성분 사전 제거 | 논문 논증 |
 | 집계 | δ_obs·Δg·δ_corr 보정표 | `A/summary.py` → `Result/A/` |
 
@@ -70,7 +71,7 @@ cd <repo 루트> && python temp.py
 # E1 cross (checkpoint/E1/runs/dorga/) — 50ep 고정
 python Experiment/E/e1_cross.py --seeds 42 1 2
 
-# A1 전체 판정 (E1→E2→E3→E4 → δ 보정)
+# A1 전체 판정 (E1→E2→E3→E4→E5 → δ 보정)
 python Experiment/A/run_all.py
 
 # 집계 → Result/*/
@@ -79,11 +80,11 @@ python Experiment/E/summary.py
 
 ## A1 판정 규칙 (draft §6)
 
-| E1·E2 결과 | A1 | δ 처리 | RB·LT 결론 |
+| E2 raw·E3 matched 결과 | A1 | δ 처리 | RB·LT 결론 |
 |---|---|---|---|
 | Δg ≈ 0 (CI 0 포함) | 성립 | δ 그대로 신뢰 | 라벨 드리프트 확정 |
-| Δg ≠ 0, E2 정합 후 소멸 | 조건부 | 수축분 제거 후 사용 | 대체로 유지 |
-| Δg ≠ 0, E2 후 잔존 | 위반 | δ_corr = δ_obs + Δg/2 | 잔존 δ 만큼만 주장 |
+| Δg_raw ≠ 0, E3 정합 후 소멸 | 조건부 | 수축분 제거 후 사용 | 대체로 유지 |
+| Δg_raw ≠ 0, E3 후 잔존 | 위반 | δ_corr = δ_obs + Δg/2 | 잔존 δ 만큼만 주장 |
 
 ## 미포팅 / 대기
 

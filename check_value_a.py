@@ -8,7 +8,7 @@ check_value_a.py — A1 최종 판정값이 draft md(§5.3)와 일치하는지 �
                          LT +0.064(CI 0 포함). CI 0 배제 ROI = RB 뿐.
   최종 판정: A1 보정 후 유의 드리프트는 RB 상위경계 하나로 국소화.
 
-산출물: checkpoint/A1_verdict.json (run_all.py). 실행: python check_value_a.py
+산출물: Result/A1_verdict.json (run_all.py). 실행: python check_value_a.py
 """
 import argparse, glob, json, sys
 from pathlib import Path
@@ -54,7 +54,7 @@ def check_dobs(rec, tol):
 
 def check_verdict(rec, tol):
     print("\n" + "=" * 76); print("[δ_corr] A1 보정 후 최종 판정 (§5.3)"); print("=" * 76)
-    p = CKPT / "A1_verdict.json"
+    p = REPO / "Result" / "A1_verdict.json"
     if not p.exists():
         print(f"  [SKIP] {p} 없음 — python Experiment/A/run_all.py (또는 --verdict_only)"); return
     V = json.loads(p.read_text(encoding="utf-8"))

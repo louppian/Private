@@ -2,7 +2,7 @@
 r"""
 run_all — A1 검증 전체 오케스트레이션 + 최종 판정   [A1_검증실험계획 §6·§7]
 
-순서(계획 §7): E3(추정기 검증) → E1(실데이터) → E2(분포정합) → E4(음성대조) → 판정.
+순서(계획 §7): E4(양성대조·추정기검증) → E1(실데이터) → E2(raw) → E3(정합) → E5(음성대조) → 판정.
 각 E 는 별도 프로세스로 실행(arm 간 GPU 메모리 격리). 마지막에 δ 보정·판정표를 낸다.
 
 δ 보정식:  δ_corr = δ_obs - (g_r - g_f)/2 = δ_obs + Δg/2
@@ -69,22 +69,23 @@ def observed_delta():
 
 
 def verdict(epochs):
-    def _ld(sub, fn):
-        p = A.A1_OUT / sub / fn
+    def _ld(rel):
+        p = A.RESULT_OUT.joinpath(*rel.split("/"))     # summary json 은 Result 에 있음
         return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
-    e2 = _ld("E2", "E2_summary.json")     # raw(A1_test) + matched(A1_test_matched) 통합
-    e3 = _ld("E3", "E3_summary.json")
-    e4 = _ld("E4", "E4_summary.json")
+    e2 = _ld("E2/e2_summary.json")        # E2 raw in-domain    (A1_test)
+    e3 = _ld("E3/e3_summary.json")        # E3 matched in-domain (A1_test_matched)
+    e4 = _ld("E4/e4_summary.json")        # E4 양성대조 (복원곡선)
+    e5 = _ld("E5/e5_summary.json")        # E5 음성대조 (누출곡선)
 
     dg_raw_map     = e2["A1_test"]         if e2 and "A1_test" in e2 else {}          # {key:{delta_g,..}}
-    dg_matched_map = e2["A1_test_matched"] if e2 and "A1_test_matched" in e2 else {}
+    dg_matched_map = e3["A1_test_matched"] if e3 and "A1_test_matched" in e3 else {}
     dobs = observed_delta()
 
     dobs_roi = {k: v for k, v in dobs.items() if k != "_source"} if dobs else {}
     V = {"E2_delta_g_raw": {k: v["delta_g"] for k, v in dg_raw_map.items()},
-         "E2_delta_g_matched": {k: v["delta_g"] for k, v in dg_matched_map.items()},
-         "E3_recovery_slope": e3.get("recovery_slope") if e3 else None,
-         "E4_leakage": [(c["train_frac"], c["delta_spurious"]) for c in e4["curve"]] if e4 else None,
+         "E3_delta_g_matched": {k: v["delta_g"] for k, v in dg_matched_map.items()},
+         "E4_recovery_slope": e4.get("recovery_slope") if e4 else None,
+         "E5_leakage": [(c["train_frac"], c["delta_spurious"]) for c in e5["curve"]] if e5 else None,
          "delta_obs_source": dobs.get("_source") if dobs else None,
          "delta_obs": {k: v["delta"] for k, v in dobs_roi.items()},
          "delta_corrected": {}}
@@ -96,24 +97,24 @@ def verdict(epochs):
             dgr = dg_raw_map.get(k, {}).get("delta_g")
             dgm = dg_matched_map.get(k, {}).get("delta_g")
             if dgr is not None:
-                row["corr_E1raw"] = v["delta"] + dgr / 2
+                row["corr_E2raw"] = v["delta"] + dgr / 2
             if dgm is not None:
-                row["corr_E2matched"] = v["delta"] + dgm / 2
+                row["corr_E3matched"] = v["delta"] + dgm / 2
             V["delta_corrected"][k] = row
 
     # 판정 요약 문장
     lines = ["=" * 78, "  A1 검증 최종 판정", "=" * 78]
-    if e3:
-        s = e3.get("recovery_slope")
-        lines.append(f"[E3 양성대조] 복원 기울기 {s:+.3f} (이상 1.0) — "
+    if e4:
+        s = e4.get("recovery_slope")
+        lines.append(f"[E4 양성대조] 복원 기울기 {s:+.3f} (이상 1.0) — "
                      + ("추정기 신뢰 가능" if s is not None and 0.8 <= s <= 1.2 else "추정기 편향 점검 필요"))
     if "overall" in dg_raw_map:
         t = dg_raw_map["overall"]
-        lines.append(f"[E1 실데이터] Δg(raw,overall) {t['delta_g']:+.4f} CI [{t['ci'][0]:+.4f},{t['ci'][1]:+.4f}] — "
+        lines.append(f"[E2 raw]     Δg(raw,overall) {t['delta_g']:+.4f} CI [{t['ci'][0]:+.4f},{t['ci'][1]:+.4f}] — "
                      + ("A1 위반 신호" if t["reject_A1"] else "A1 기각 못함"))
     if "overall" in dg_matched_map:
         t = dg_matched_map["overall"]
-        lines.append(f"[E2 정합]    Δg(matched,overall) {t['delta_g']:+.4f} CI [{t['ci'][0]:+.4f},{t['ci'][1]:+.4f}] — "
+        lines.append(f"[E3 matched] Δg(matched,overall) {t['delta_g']:+.4f} CI [{t['ci'][0]:+.4f},{t['ci'][1]:+.4f}] — "
                      + ("진짜 비대칭 잔존(A1 위반)" if t["reject_A1"] else "정합 후 소멸(수축 기원)"))
     if dg_raw_map:
         lines.append("")
@@ -124,32 +125,33 @@ def verdict(epochs):
                          f"{(m if m is not None else float('nan')):>+12.3f}")
     if V["delta_corrected"]:
         lines.append("")
-        lines.append(f"{'ROI':<9}{'δ_obs':>10}{'δ_corr(E1raw)':>16}{'δ_corr(E2matched)':>19}")
+        lines.append(f"{'ROI':<9}{'δ_obs':>10}{'δ_corr(E2raw)':>16}{'δ_corr(E3matched)':>19}")
         for k, row in V["delta_corrected"].items():
             lines.append(f"{k:<9}{row['delta_obs']:>+10.3f}"
-                         f"{row.get('corr_E1raw', float('nan')):>+16.3f}"
-                         f"{row.get('corr_E2matched', float('nan')):>+19.3f}")
+                         f"{row.get('corr_E2raw', float('nan')):>+16.3f}"
+                         f"{row.get('corr_E3matched', float('nan')):>+19.3f}")
         lines.append("")
         lines.append("→ RB·LT 의 δ_corr 이 여전히 양(+)으로 크면 라벨 드리프트 결론 유지,")
         lines.append("  0 근처로 붕괴하면 관측 δ 는 모델 방향비대칭의 산물이었음.")
     txt = "\n".join(lines)
-    A.save_json(V, A.A1_OUT / "A1_verdict.json")
-    (A.A1_OUT / "A1_verdict.txt").write_text(txt, encoding="utf-8")
+    A.save_json(V, A.RESULT_OUT / "A1_verdict.json")           # 판정 json 은 Result (git 추적)
+    (A.RESULT_OUT / "A1_verdict.txt").write_text(txt, encoding="utf-8")
     print("\n" + txt)
-    print("\nsaved:", A.A1_OUT / "A1_verdict.json", "/", A.A1_OUT / "A1_verdict.txt")
+    print("\nsaved:", A.RESULT_OUT / "A1_verdict.json", "/", A.RESULT_OUT / "A1_verdict.txt")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", nargs="+", default=["E1", "E2", "E3", "E4"],
-                    choices=["E1", "E2", "E3", "E4"])
+    ap.add_argument("--only", nargs="+", default=["E1", "E2", "E3", "E4", "E5"],
+                    choices=["E1", "E2", "E3", "E4", "E5"])
     ap.add_argument("--verdict_only", action="store_true")
     args = ap.parse_args()
 
     if not args.verdict_only:
-        order = [s for s in ["E1", "E2", "E3", "E4"] if s in args.only]
-        script = {"E1": "e1_cross.py", "E2": "e2_indomain.py",
-                  "E3": "e3_positive_control.py", "E4": "e4_negative_control.py"}
+        order = [s for s in ["E1", "E2", "E3", "E4", "E5"] if s in args.only]
+        script = {"E1": "e1_cross.py", "E2": "e2_indomain_raw.py",
+                  "E3": "e3_indomain_matched.py", "E4": "e4_positive_control.py",
+                  "E5": "e5_negative_control.py"}
         for step in order:
             run_step(script[step])                     # epochs 고정(50) → 인자 없음
 

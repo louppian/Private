@@ -84,7 +84,7 @@ R, C, K      = 4, 5, 7
 PROJ_DIM     = 768
 BATCH_SIZE   = 32
 FREEZE_BLOCKS = 6         
-VAL_FRAC     = 0.10          # train:val = 9:1
+VAL_FRAC     = 0.20          # train:val = 8:2 (PLAN §2 공통)
 EPOCHS       = 50            # 고정: 무조건 50 에폭 (전 실험 공통, override 없음)
 TAIL_EPOCHS  = 5
 EARLYSTOP_PATIENCE = 10      # 고정: early-stop patience 10 (전 실험 공통)
@@ -582,6 +582,19 @@ def run_one_scorer(name, mode, seed, epochs, root, eval_test_every=1, arm=None):
         torch.cuda.empty_cache()
 
 
+def _result_dir(run_dir):
+    """checkpoint/<rel> → Result/<rel>. json(results/history) 은 Result(git 추적)에,
+    가중치·npz 는 run_dir(checkpoint)에 남긴다. checkpoint 밖이면 run_dir 그대로."""
+    run_dir = Path(run_dir)
+    try:
+        rel = run_dir.resolve().relative_to((Path(_REPO) / "checkpoint").resolve())
+        d = Path(_REPO) / "Result" / rel
+    except ValueError:
+        d = run_dir
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def _write_results(run_dir, name, mode, seed, TRAIN_Y, TEST_Y, df, epochs, best_epoch,
                    best_val, acc, mae, bias, per, hist, P, Y, test_patients, bseed):
     tail = [h["test_bias"] for h in hist if "test_bias" in h][-TAIL_EPOCHS:]
@@ -594,19 +607,11 @@ def _write_results(run_dir, name, mode, seed, TRAIN_Y, TEST_Y, df, epochs, best_
                tail_bias=float(np.mean(tail)) if tail else float("nan"),
                pat_bias=bs["bias"], ci_lo=bs["ci"][0], ci_hi=bs["ci"][1],
                per_roi={r: dict(acc=per[r][0], mae=per[r][1], bias=per[r][2]) for r in ROI})
-    (run_dir / "results.json").write_text(json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
-    (run_dir / "history.json").write_text(json.dumps(hist, indent=1), encoding="utf-8")
+    # checkpoint(run_dir) = 가중치(.pth) + npz.  Result = json(results/history, git 추적).
     np.savez(run_dir / "test_preds.npz", preds=P, labels=Y, patients=test_patients)
-
-    # results·history 를 Result/ 에도 미러 (git 추적). 가중치·npz 는 checkpoint 에만.
-    try:
-        rel = Path(run_dir).resolve().relative_to((Path(_REPO) / "checkpoint").resolve())
-        rdir = Path(_REPO) / "Result" / rel
-        rdir.mkdir(parents=True, exist_ok=True)
-        (rdir / "results.json").write_text(json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
-        (rdir / "history.json").write_text(json.dumps(hist, indent=1), encoding="utf-8")
-    except Exception:
-        pass
+    rdir = _result_dir(run_dir)
+    (rdir / "results.json").write_text(json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
+    (rdir / "history.json").write_text(json.dumps(hist, indent=1), encoding="utf-8")
     print(f"  ✔ final bias {bias:+.4f} | best_val_mae {best_val:.4f}@ep{best_epoch}")
 
 
@@ -626,7 +631,7 @@ def train_arm(model, mode, seed, epochs, stage_root, arm=None):
 
 
 def _load_result(run_dir: Path) -> dict:
-    p = run_dir / "results.json"
+    p = _result_dir(run_dir) / "results.json"     # json 은 Result 에 있음
     if not p.exists():
         return {}
     r = json.loads(p.read_text(encoding="utf-8"))

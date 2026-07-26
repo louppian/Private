@@ -28,7 +28,8 @@ from scipy import ndimage as ndi
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "E"))
 import e_common as A
 
-OUT = A.A1_OUT
+OUT = A.RESULT_OUT / "L"                # L 산출(csv·txt)은 Result/L (git 추적)
+OUT.mkdir(parents=True, exist_ok=True)
 IMG24 = r"D:\MICCAI2026\inhauh\image_normalize"
 MSK24 = r"D:\MICCAI2026\inhauh\mask_normalize"
 R4 = ["RT", "RB", "LT", "LB"]          # split4 순서
