@@ -1,0 +1,48 @@
+{
+ "model": "dorga",
+ "mode": "matched_2024_fold0",
+ "seed": 42,
+ "train_year": 2024,
+ "test_year": 2024,
+ "roi_order": [
+  "RT",
+  "LT",
+  "RB",
+  "LB"
+ ],
+ "mrm": "/shared/home/mai/JeongGeon/IEEETMI/weight/DORGA_Brixia.pth",
+ "n_train": 311,
+ "n_test": 100,
+ "final_epoch": 50,
+ "best_val_epoch": 6,
+ "best_val_mae": 0.4266666666666667,
+ "acc": 0.5575,
+ "mae": 0.4725,
+ "bias": -0.0575,
+ "tail_bias": -0.0925,
+ "pat_bias": -0.06293650793650793,
+ "ci_lo": -0.2357494588744589,
+ "ci_hi": 0.11238744588744569,
+ "per_roi": {
+  "RT": {
+   "acc": 0.52,
+   "mae": 0.48,
+   "bias": 0.14
+  },
+  "LT": {
+   "acc": 0.58,
+   "mae": 0.44,
+   "bias": 0.06
+  },
+  "RB": {
+   "acc": 0.6,
+   "mae": 0.47,
+   "bias": -0.29
+  },
+  "LB": {
+   "acc": 0.53,
+   "mae": 0.5,
+   "bias": -0.14
+  }
+ }
+}

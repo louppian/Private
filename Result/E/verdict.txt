@@ -1,30 +1,9 @@
-
-[dorga]  fwd(train2024→test2026) vs rev(train2026→test2024)  | seeds fwd=3 rev=3
-  [fwd] test  MAE 0.428±0.047  ACC 0.601±0.038  overall bias -0.280±0.090
-  [rev] test  MAE 0.503±0.016  ACC 0.535±0.012  overall bias +0.263±0.024
-  overall    -0.280±0.090    +0.263±0.024             YES
-  RT        -0.197±0.110    +0.215±0.028             YES
-  LT        -0.286±0.058    +0.406±0.043             YES
-  RB        -0.379±0.117    +0.280±0.010             YES
-  LB        -0.260±0.078    +0.149±0.064             YES
-  → dorga: 4개 영역 중 4개에서 H_data 방향반전(fwd<0<rev)
-
-[bsnet]  fwd(train2024→test2026) vs rev(train2026→test2024)  | seeds fwd=3 rev=3
-  [fwd] test  MAE 0.876±0.076  ACC 0.400±0.011  overall bias +0.349±0.102
-  [rev] test  MAE 0.760±0.021  ACC 0.421±0.006  overall bias -0.104±0.122
-  overall    +0.349±0.102    -0.104±0.122              no
-  RT        +0.491±0.304    -0.211±0.087              no
-  LT        -0.048±0.065    -0.014±0.257              no
-  RB        +0.602±0.161    -0.110±0.095              no
-  LB        +0.349±0.047    -0.079±0.175              no
-  → bsnet: 4개 영역 중 0개에서 H_data 방향반전(fwd<0<rev)
-
-[pafe]  fwd(train2024→test2026) vs rev(train2026→test2024)  | seeds fwd=3 rev=3
-  [fwd] test  MAE 0.963±0.051  ACC 0.376±0.016  overall bias +0.641±0.053
-  [rev] test  MAE 0.646±0.005  ACC 0.467±0.005  overall bias -0.028±0.038
-  overall    +0.641±0.053    -0.028±0.038              no
-  RT        +0.712±0.080    -0.095±0.027              no
-  LT        +0.751±0.113    +0.010±0.034              no
-  RB        +0.455±0.036    -0.016±0.072              no
-  LB        +0.647±0.068    -0.009±0.039              no
-  → pafe: 4개 영역 중 0개에서 H_data 방향반전(fwd<0<rev)
+[dorga]  fwd(2024→2026) vs rev(2026→2024)  | splits fwd=1 rev=3
+  [fwd] test  MAE 0.413±0.000  ACC 0.618±0.000  overall bias -0.233±0.000
+  [rev] test  MAE 0.482±0.019  ACC 0.553±0.016  overall bias +0.224±0.024
+  overall    -0.233±0.000    +0.224±0.024             YES
+  RT        -0.099±0.000    +0.195±0.047             YES
+  LT        -0.240±0.000    +0.329±0.025             YES
+  RB        -0.300±0.000    +0.250±0.070             YES
+  LB        -0.293±0.000    +0.122±0.002             YES
+  → dorga: 4개 영역 중 4개에서 방향반전(fwd<0<rev)
