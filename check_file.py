@@ -73,8 +73,6 @@ for rel, name in [
     ("Experiment/E/e3_positive_control.py", "e3_positive_control"),
     ("Experiment/E/e4_negative_control.py", "e4_negative_control"),
     ("Experiment/E/summary.py", "e_summary"),
-    ("Experiment/A/run_all.py", "run_all"),
-    ("Experiment/A/summary.py", "a_summary"),
     ("Experiment/L/summary.py", "l_summary"),
 ]:
     check(name, lambda rel=rel, name=name: _import(rel, name))

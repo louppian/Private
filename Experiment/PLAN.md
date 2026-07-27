@@ -67,7 +67,7 @@
 | **E4** 양성대조 | 한 코호트(2024)를 정합 두 반쪽 H1·H2. H2에 오프셋 β ∈ {0, 0.25, 0.5, 1.0} 주입. reps 42·1·2. 복원곡선(β→δ) 기울기·절편 | `checkpoint/E4/` + `e4_summary.json` |
 | **E5** 음성대조 | β=0, 학습량 비대칭 train_frac ∈ {1.0, 0.5, 0.25}. reps 42·1·2. δ_spurious 누출 | `checkpoint/E5/` + `e5_summary.json` |
 
-판정: δ_corr = δ_obs + Δg/2 (E3 matched). `A/run_all.py` → `A1_verdict.json`.
+판정: δ_corr = δ_obs + Δg/2 (E3 matched). `E/summary.py` → `A1_verdict.json` (+CI).
 
 ## 5. L 분석 (학습 무관: L1·L2·L4)
 
@@ -97,12 +97,11 @@ python Experiment/E/e2_indomain_raw.py --folds 5 --init_seeds 42 1 2      # E2 r
 python Experiment/E/e3_indomain_matched.py --folds 5 --init_seeds 42 1 2  # E3 matched
 python Experiment/E/e4_positive_control.py --year 2024 --betas 0 0.25 0.5 1.0 --reps 42 1 2
 python Experiment/E/e5_negative_control.py --year 2024 --fracs 1.0 0.5 0.25 --reps 42 1 2
-python Experiment/A/run_all.py
 
 python Experiment/L/l1_structure.py
 python Experiment/L/l2_label_image.py
 python Experiment/L/l4_reproducibility.py --rr <reread.csv>
 
-python Experiment/E/summary.py
+python Experiment/E/summary.py    # E1~E5 집계 + δ_corr 판정 → Result/A1_verdict.json
 python check_value_l.py ; python check_value_e.py ; python check_value_a.py
 ```

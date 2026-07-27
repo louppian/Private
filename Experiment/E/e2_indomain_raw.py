@@ -5,7 +5,7 @@ E2 — in-domain raw Δg 추정 (전 환자)   [draft §5.2 raw / 舊 E1 부록 
 목적: g_2024·g_2026 을 in-domain(c→c)으로 추정해 A1 검정(Δg_raw).
       in-domain 은 라벨 오프셋 b_c 가 상쇄되어 bias(c→c)=g_c(순수 모델오차).
 설계: 코호트별 환자 단위 K-fold(모든 환자 1회 test) × init seed 반복. 영역 [RT,LT,RB,LB].
-      matched(등급분포 정합)는 E3 에서 별도 산출 → 수축분(Δg_raw−Δg_matched) 은 run_all 판정.
+      matched(등급분포 정합)는 E3 에서 별도 산출 → 수축분(Δg_raw−Δg_matched) 은 summary.py 판정.
 
 실행:  python e2_indomain_raw.py --folds 5 --init_seeds 42 1 2
 산출:  checkpoint/E2/dorga/ (가중치·npz) + Result/E2/dorga/ (per-run json) + Result/E2/e2_summary.json
