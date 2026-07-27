@@ -1,0 +1,48 @@
+{
+ "model": "dorga",
+ "mode": "matched_2024_fold0",
+ "seed": 1,
+ "train_year": 2024,
+ "test_year": 2024,
+ "roi_order": [
+  "RT",
+  "LT",
+  "RB",
+  "LB"
+ ],
+ "mrm": "/shared/home/mai/JeongGeon/MICCAI2026/MRM.pth",
+ "n_train": 311,
+ "n_test": 100,
+ "final_epoch": 50,
+ "best_val_epoch": 13,
+ "best_val_mae": 0.51,
+ "acc": 0.5,
+ "mae": 0.54,
+ "bias": -0.07,
+ "tail_bias": -0.1875,
+ "pat_bias": -0.0816810966810967,
+ "ci_lo": -0.31506899350649353,
+ "ci_hi": 0.1681799242424239,
+ "per_roi": {
+  "RT": {
+   "acc": 0.47,
+   "mae": 0.54,
+   "bias": 0.2
+  },
+  "LT": {
+   "acc": 0.51,
+   "mae": 0.5,
+   "bias": 0.14
+  },
+  "RB": {
+   "acc": 0.53,
+   "mae": 0.59,
+   "bias": -0.45
+  },
+  "LB": {
+   "acc": 0.49,
+   "mae": 0.53,
+   "bias": -0.17
+  }
+ }
+}
