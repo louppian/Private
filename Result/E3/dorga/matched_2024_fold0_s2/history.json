@@ -1,0 +1,210 @@
+[
+ {
+  "epoch": 1,
+  "tr_bias": 0.2725694444444444,
+  "val_bias": 0.21666666666666667,
+  "test_bias": 0.535,
+  "test_acc": 0.225,
+  "test_mae": 1.05
+ },
+ {
+  "epoch": 2,
+  "tr_bias": 0.3654513888888889,
+  "val_bias": -0.4533333333333333,
+  "test_bias": -0.3175,
+  "test_acc": 0.4475,
+  "test_mae": 0.6875
+ },
+ {
+  "epoch": 3,
+  "tr_bias": 0.2899305555555556,
+  "val_bias": -0.1,
+  "test_bias": 0.1675,
+  "test_acc": 0.365,
+  "test_mae": 0.7475
+ },
+ {
+  "epoch": 4,
+  "tr_bias": 0.18489583333333334,
+  "val_bias": -0.3,
+  "test_bias": -0.185,
+  "test_acc": 0.4675,
+  "test_mae": 0.64
+ },
+ {
+  "epoch": 5,
+  "tr_bias": 0.1328125,
+  "val_bias": -0.38333333333333336,
+  "test_bias": -0.27,
+  "test_acc": 0.4475,
+  "test_mae": 0.665
+ },
+ {
+  "epoch": 6,
+  "tr_bias": 0.024305555555555556,
+  "val_bias": -0.10333333333333333,
+  "test_bias": -0.1925,
+  "test_acc": 0.4875,
+  "test_mae": 0.5825
+ },
+ {
+  "epoch": 7,
+  "tr_bias": 0.059895833333333336,
+  "val_bias": -0.07666666666666666,
+  "test_bias": -0.0325,
+  "test_acc": 0.4875,
+  "test_mae": 0.5625
+ },
+ {
+  "epoch": 8,
+  "tr_bias": 0.06076388888888889,
+  "val_bias": 0.03,
+  "test_bias": 0.0475,
+  "test_acc": 0.505,
+  "test_mae": 0.5325
+ },
+ {
+  "epoch": 9,
+  "tr_bias": 0.07378472222222222,
+  "val_bias": -0.14333333333333334,
+  "test_bias": -0.11,
+  "test_acc": 0.4975,
+  "test_mae": 0.555
+ },
+ {
+  "epoch": 10,
+  "tr_bias": 0.0642361111111111,
+  "val_bias": -0.17333333333333334,
+  "test_bias": -0.0525,
+  "test_acc": 0.4725,
+  "test_mae": 0.5775
+ },
+ {
+  "epoch": 11,
+  "tr_bias": 0.08072916666666667,
+  "val_bias": -0.25,
+  "test_bias": -0.3125,
+  "test_acc": 0.4525,
+  "test_mae": 0.6375
+ },
+ {
+  "epoch": 12,
+  "tr_bias": 0.10677083333333333,
+  "val_bias": -0.4066666666666667,
+  "test_bias": -0.2525,
+  "test_acc": 0.4625,
+  "test_mae": 0.6075
+ },
+ {
+  "epoch": 13,
+  "tr_bias": 0.04774305555555555,
+  "val_bias": -0.21333333333333335,
+  "test_bias": -0.1225,
+  "test_acc": 0.495,
+  "test_mae": 0.5475
+ },
+ {
+  "epoch": 14,
+  "tr_bias": 0.017361111111111112,
+  "val_bias": -0.4666666666666667,
+  "test_bias": -0.315,
+  "test_acc": 0.4575,
+  "test_mae": 0.61
+ },
+ {
+  "epoch": 15,
+  "tr_bias": 0.05555555555555555,
+  "val_bias": -0.38333333333333336,
+  "test_bias": -0.215,
+  "test_acc": 0.48,
+  "test_mae": 0.565
+ },
+ {
+  "epoch": 16,
+  "tr_bias": 0.017361111111111112,
+  "val_bias": -0.09666666666666666,
+  "test_bias": 0.0225,
+  "test_acc": 0.5175,
+  "test_mae": 0.5075
+ },
+ {
+  "epoch": 17,
+  "tr_bias": 0.036458333333333336,
+  "val_bias": -0.08666666666666667,
+  "test_bias": 0.0175,
+  "test_acc": 0.52,
+  "test_mae": 0.5125
+ },
+ {
+  "epoch": 18,
+  "tr_bias": 0.035590277777777776,
+  "val_bias": -0.22,
+  "test_bias": -0.0725,
+  "test_acc": 0.505,
+  "test_mae": 0.5275
+ },
+ {
+  "epoch": 19,
+  "tr_bias": 0.036458333333333336,
+  "val_bias": -0.16666666666666666,
+  "test_bias": -0.08,
+  "test_acc": 0.505,
+  "test_mae": 0.53
+ },
+ {
+  "epoch": 20,
+  "tr_bias": 0.025173611111111112,
+  "val_bias": -0.12666666666666668,
+  "test_bias": -0.0275,
+  "test_acc": 0.4975,
+  "test_mae": 0.5275
+ },
+ {
+  "epoch": 21,
+  "tr_bias": 0.06336805555555555,
+  "val_bias": -0.39,
+  "test_bias": -0.2675,
+  "test_acc": 0.4625,
+  "test_mae": 0.5875
+ },
+ {
+  "epoch": 22,
+  "tr_bias": 0.05295138888888889,
+  "val_bias": -0.16,
+  "test_bias": -0.1,
+  "test_acc": 0.5075,
+  "test_mae": 0.53
+ },
+ {
+  "epoch": 23,
+  "tr_bias": 0.029513888888888888,
+  "val_bias": -0.17333333333333334,
+  "test_bias": -0.105,
+  "test_acc": 0.4725,
+  "test_mae": 0.57
+ },
+ {
+  "epoch": 24,
+  "tr_bias": 0.019097222222222224,
+  "val_bias": -0.11,
+  "test_bias": -0.0475,
+  "test_acc": 0.5125,
+  "test_mae": 0.5225
+ },
+ {
+  "epoch": 25,
+  "tr_bias": 0.03125,
+  "val_bias": -0.17,
+  "test_bias": -0.1175,
+  "test_acc": 0.475,
+  "test_mae": 0.5725
+ },
+ {
+  "epoch": 26,
+  "tr_bias": 0.049479166666666664,
+  "val_bias": -0.12,
+  "test_bias": -0.0775,
+  "test_acc": 0.505,
+  "test_mae": 0.5375
+ }
+]
