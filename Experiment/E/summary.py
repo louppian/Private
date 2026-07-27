@@ -132,37 +132,45 @@ def _boot_mean(vec, n=NBOOT, seed=0):
 
 
 # ═══════════════ 최종 판정 δ_corr = δ_obs + Δγ_matched/2 ═══════════════
-def build_verdict():
-    """E1 npz(δ_obs) + E3 matched vec(Δγ) → δ_corr + 환자 부트스트랩 CI → Result/A1_verdict.json.
-    CI 는 δ_obs(fwd/rev 독립)·Δγ(2024/2026 독립) 두 부트스트랩을 결합해 산출."""
+def build_verdict(dobs_map=None):
+    """δ_obs 점추정은 E1 split 평균(dobs_map, results.json 유래 = git 재현) **단일 소스**를 쓴다.
+    E1 표와 δ_corr 이 같은 δ_obs 를 공유하므로 두 값이 갈리지 않는다.
+    Δγ 점추정·CI 는 e3_summary.json(git). δ_obs·δ_corr 의 CI 는 npz 환자 부트스트랩 폭을
+    점추정에 중심맞춰 산출(npz 없으면 CI 생략, 점추정만). → Result/A1_verdict.json."""
     def _ld(p):
         return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
     e3 = _ld(RESULT_E3 / "e3_summary.json")
     e4 = _ld(RESULT_E4 / "e4_summary.json")
     e5 = _ld(RESULT_E5 / "e5_summary.json")
 
+    def _reci(boot, point):                          # 부트스트랩 폭을 점추정 중심에 맞춤
+        lo, hi = np.percentile(boot, [2.5, 97.5]); m = float(boot.mean())
+        return [float(point + (lo - m)), float(point + (hi - m))]
+
     keys = ["overall"] + ROI
     dc = {}
     for key in keys:
         roi = None if key == "overall" else key
+        if not (dobs_map and key in dobs_map):
+            continue
+        dobs = float(dobs_map[key]["delta_obs"]); gamma = float(dobs_map[key]["gamma"])
+        row = {"delta_obs": dobs, "gamma": gamma}
         f = _pooled_patient_bias("24to26", roi)
         r = _pooled_patient_bias("26to24", roi)
-        if f is None or r is None:
-            continue
-        bf, br = _boot_mean(f, seed=1), _boot_mean(r, seed=2)
-        dboot = (br - bf) / 2
-        dobs = float((r.mean() - f.mean()) / 2)
-        row = {"delta_obs": dobs, "gamma": float((r.mean() + f.mean()) / 2),
-               "delta_obs_ci": [float(np.percentile(dboot, 2.5)), float(np.percentile(dboot, 97.5))]}
+        dboot = None
+        if f is not None and r is not None:          # npz 있으면 CI(점추정 중심)
+            dboot = (_boot_mean(r, seed=2) - _boot_mean(f, seed=1)) / 2
+            row["delta_obs_ci"] = _reci(dboot, dobs)
         if e3 and "matched" in e3:
             try:
                 a = np.array(e3["matched"]["2024"][key]["vec"], dtype=float)
                 b = np.array(e3["matched"]["2026"][key]["vec"], dtype=float)
                 dg = float(a.mean() - b.mean())
-                corr_boot = dboot + (_boot_mean(a, seed=3) - _boot_mean(b, seed=4)) / 2
                 row["delta_g_matched"] = dg
                 row["delta_corr"] = dobs + dg / 2
-                row["ci"] = [float(np.percentile(corr_boot, 2.5)), float(np.percentile(corr_boot, 97.5))]
+                if dboot is not None:
+                    corr_boot = dboot + (_boot_mean(a, seed=3) - _boot_mean(b, seed=4)) / 2
+                    row["ci"] = _reci(corr_boot, row["delta_corr"])
             except (KeyError, TypeError, ValueError):
                 pass
         dc[key] = row
@@ -265,7 +273,8 @@ def main():
         w.writeheader(); w.writerows(csv_rows)
     print(f"[save] {csv_path}")
 
-    build_verdict()                     # δ_corr + CI → Result/A1_verdict.json
+    dobs_map = {row["roi"]: row for row in csv_rows}   # E1 표와 동일한 split 평균 δ_obs 단일 소스
+    build_verdict(dobs_map)             # δ_corr + CI → Result/A1_verdict.json
 
 
 if __name__ == "__main__":
