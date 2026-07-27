@@ -11,7 +11,7 @@ E2 — in-domain raw Δg 추정 (전 환자)   [draft §5.2 raw / 舊 E1 부록 
 산출:  checkpoint/E2/dorga/ (가중치·npz) + Result/E2/dorga/ (per-run json) + Result/E2/e2_summary.json
        (A1_test=Δg_raw)
 """
-import argparse, os as _os, sys as _sys
+import argparse, json, os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "E"))
 import e_common as A
 
@@ -20,28 +20,45 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--init_seeds", type=int, nargs="+", default=[42, 1, 2])
+    ap.add_argument("--years", type=int, nargs="+", default=[2024, 2026], choices=[2024, 2026],
+                    help="학습할 코호트. 한 연도만 주면 그 코호트만 학습·캐시(Δg 는 두 연도 모두 있어야 산출)")
+    ap.add_argument("--skip-existing", dest="skip_existing", action="store_true",
+                    help="arm 의 test_preds.npz 가 이미 있으면 학습 생략(중단 후 재개용)")
     args = ap.parse_args()
 
     root = A.A1_OUT / "E2" / "dorga"              # checkpoint/E2/dorga
+    out_dir = A.RESULT_OUT / "E2"
     keys = ["overall"] + list(A.ROI)
 
-    raw24 = A.run_cohort(2024, args.folds, 0, args.init_seeds, root, tag="raw")   # fold 분할 seed 고정 0
-    raw26 = A.run_cohort(2026, args.folds, 0, args.init_seeds, root, tag="raw")
-    out = {"raw": {"2024": raw24, "2026": raw26}, "A1_test": A.a1_test(raw24, raw26, keys)}
-    A.save_json(out, A.RESULT_OUT / "E2" / "e2_summary.json")
+    cohort = {}
+    for yr in args.years:
+        m = A.run_cohort(yr, args.folds, 0, args.init_seeds, root, tag="raw",
+                         skip_existing=args.skip_existing)                        # fold 분할 seed 고정 0
+        A.save_json(m, out_dir / f"e2_cohort_{yr}.json")
+        cohort[yr] = m
+        print(f"  raw {yr}: ACC {m['acc']:.4f}  MAE {m['mae']:.4f}  (n_pat {m['n_pat']})")
+
+    for yr in (2024, 2026):
+        if yr not in cohort and (out_dir / f"e2_cohort_{yr}.json").exists():
+            cohort[yr] = json.loads((out_dir / f"e2_cohort_{yr}.json").read_text(encoding="utf-8"))
+
+    if 2024 not in cohort or 2026 not in cohort:
+        need = [y for y in (2024, 2026) if y not in cohort]
+        print(f"\n[부분 완료] 보유 {sorted(cohort)} — {need} 도 실행해야 Δg·e2_summary.json 산출.")
+        return
+
+    out = {"raw": {"2024": cohort[2024], "2026": cohort[2026]},
+           "A1_test": A.a1_test(cohort[2024], cohort[2026], keys)}
+    A.save_json(out, out_dir / "e2_summary.json")
 
     print("\n" + "=" * 66)
-    print(f"E2 raw in-domain Δg_raw = g_2024 − g_2026")
+    print("E2 raw in-domain Δg_raw = g_2024 − g_2026")
     print(f"{'ROI':<9}{'Δg_raw':>12}{'CI':>26}{'A1(raw)':>12}")
     for key in keys:
         t = out["A1_test"][key]
         flag = "위반 신호" if t["reject_A1"] else "미기각"
         print(f"{key:<9}{t['delta_g']:>+12.3f}   [{t['ci'][0]:+.3f}, {t['ci'][1]:+.3f}]{flag:>12}")
-    print("\n[in-domain 성능 (cross 대조용)]")
-    for yr in ("2024", "2026"):
-        c = out["raw"][yr]
-        print(f"  raw {yr}: ACC {c['acc']:.4f}  MAE {c['mae']:.4f}  (n_pat {c['n_pat']})")
-    print("saved:", A.RESULT_OUT / "E2" / "e2_summary.json")
+    print("saved:", out_dir / "e2_summary.json")
 
 
 if __name__ == "__main__":

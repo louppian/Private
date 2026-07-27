@@ -150,15 +150,21 @@ def match_two_cohorts(df, seed, n_bins=5):
 # ═══════════════════════════════════════════════════════════════
 # 실행 래퍼 — 등록된 mode 로 B.run_one 호출
 # ═══════════════════════════════════════════════════════════════
-def run_arm(mode, splitter, seed, epochs, root=None, model="dorga", arm=None):
+def run_arm(mode, splitter, seed, epochs, root=None, model="dorga", arm=None, skip_existing=False):
     """splitter 등록 후 core.train_arm 실행 (core 가 사전정렬 이미지를 디스크에서 로드).
-    arm 주면 run_dir 이름을 그걸로(미지정 시 {mode}_s{seed}). results dict(+ npz) 반환."""
+    arm 주면 run_dir 이름을 그걸로(미지정 시 {mode}_s{seed}). results dict(+ npz) 반환.
+    skip_existing=True 면 test_preds.npz + results.json 이 이미 있으면 학습 생략하고 재사용(재개용)."""
     register(mode, splitter)
     root = Path(root)
-    B.train_arm(model, mode, seed, epochs, root, arm=arm)
     run_dir = root / (arm if arm else f"{mode}_s{seed}")     # checkpoint 하 arm 디렉터리
-    res = json.loads((B._result_dir(run_dir) / "results.json").read_text(encoding="utf-8"))  # json 은 Result
-    res["npz"] = str(run_dir / "test_preds.npz")             # npz 는 checkpoint
+    npz = run_dir / "test_preds.npz"                         # npz 는 checkpoint
+    rj = B._result_dir(run_dir) / "results.json"             # json 은 Result
+    if skip_existing and npz.exists() and rj.exists():
+        print(f"[skip] {run_dir.name} (test_preds.npz 존재 → 학습 생략)")
+        res = json.loads(rj.read_text(encoding="utf-8")); res["npz"] = str(npz)
+        return res
+    B.train_arm(model, mode, seed, epochs, root, arm=arm)
+    res = json.loads(rj.read_text(encoding="utf-8")); res["npz"] = str(npz)
     return res
 
 
@@ -229,8 +235,9 @@ def indomain_fold_splitter(year, test_pat, seed, keep_pat=None):
     return _fn
 
 
-def run_cohort(year, folds, seed, init_seeds, root, keep_pat=None, tag="raw"):
-    """한 코호트 K-fold(전 환자 1회 test) × init_seeds → overall·ROI별 환자 bias 벡터."""
+def run_cohort(year, folds, seed, init_seeds, root, keep_pat=None, tag="raw", skip_existing=False):
+    """한 코호트 K-fold(전 환자 1회 test) × init_seeds → overall·ROI별 환자 bias 벡터.
+    skip_existing 은 arm 별로 run_arm 에 전달(이미 학습된 fold·seed 는 건너뜀)."""
     df = _prep(pd.read_csv(MANIFEST))
     if keep_pat is None:
         fold_list = kfold_patient_folds(df, year, folds, seed)
@@ -244,7 +251,8 @@ def run_cohort(year, folds, seed, init_seeds, root, keep_pat=None, tag="raw"):
     for k, test_pat in fold_list:
         for isd in init_seeds:
             mode = f"{tag}_{year}_fold{k}"             # seed 는 core 가 _s{isd} 로 붙임
-            res = run_arm(mode, indomain_fold_splitter(year, test_pat, seed, keep_pat), isd, B.EPOCHS, root)
+            res = run_arm(mode, indomain_fold_splitter(year, test_pat, seed, keep_pat), isd, B.EPOCHS, root,
+                          skip_existing=skip_existing)
             d = np.load(res["npz"], allow_pickle=True)
             P, Y, pats_te = d["preds"], d["labels"], np.asarray(d["patients"])
             Pall.append(P); Yall.append(Y)
