@@ -18,12 +18,16 @@ import e_common as A
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--folds", type=int, default=5)
-    ap.add_argument("--init_seeds", type=int, nargs="+", default=[42, 1, 2])
+    ap.add_argument("--folds", type=int, default=5, help="fold 분할 수(파티션). 기본 5")
+    ap.add_argument("--only-folds", dest="only_folds", type=int, nargs="+", default=None,
+                    help="학습할 fold 인덱스(0~folds-1). 미지정=전체. 특정 fold 만 돌릴 때")
+    ap.add_argument("--init_seeds", type=int, nargs="+", default=[42, 1, 2],
+                    help="init seed 목록. 하나만 주면 그 seed 만 (예: --init_seeds 42)")
     ap.add_argument("--years", type=int, nargs="+", default=[2024, 2026], choices=[2024, 2026],
                     help="학습할 코호트. 한 연도만 주면 그 코호트만 학습·캐시(Δγ 는 두 연도 모두 있어야 산출)")
-    ap.add_argument("--skip-existing", dest="skip_existing", action="store_true",
-                    help="arm 의 test_preds.npz 가 이미 있으면 학습 생략(중단 후 재개용)")
+    ap.add_argument("--overwrite", dest="skip_existing", action="store_false",
+                    help="기본은 test_preds.npz 있으면 학습 생략(skip-existing 기본 ON). 이 옵션이면 강제 재학습")
+    ap.set_defaults(skip_existing=True)
     args = ap.parse_args()
 
     root = A.A1_OUT / "E3" / "dorga"              # checkpoint/E3/dorga
@@ -36,7 +40,8 @@ def main():
     cohort = {}
     for yr in args.years:
         m = A.run_cohort(yr, args.folds, 0, args.init_seeds, root, keep_pat=keep[yr],
-                         tag="matched", skip_existing=args.skip_existing)         # fold 분할 seed 0
+                         tag="matched", skip_existing=args.skip_existing,
+                         only_folds=args.only_folds)                              # fold 분할 seed 0
         A.save_json(m, out_dir / f"e3_cohort_{yr}.json")
         cohort[yr] = m
         print(f"  matched {yr}: ACC {m['acc']:.4f}  MAE {m['mae']:.4f}  (n_pat {m['n_pat']})")

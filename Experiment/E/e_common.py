@@ -150,7 +150,7 @@ def match_two_cohorts(df, seed, n_bins=5):
 # ═══════════════════════════════════════════════════════════════
 # 실행 래퍼 — 등록된 mode 로 B.run_one 호출
 # ═══════════════════════════════════════════════════════════════
-def run_arm(mode, splitter, seed, epochs, root=None, model="dorga", arm=None, skip_existing=False):
+def run_arm(mode, splitter, seed, epochs, root=None, model="dorga", arm=None, skip_existing=True):
     """splitter 등록 후 core.train_arm 실행 (core 가 사전정렬 이미지를 디스크에서 로드).
     arm 주면 run_dir 이름을 그걸로(미지정 시 {mode}_s{seed}). results dict(+ npz) 반환.
     skip_existing=True 면 test_preds.npz + results.json 이 이미 있으면 학습 생략하고 재사용(재개용)."""
@@ -235,9 +235,11 @@ def indomain_fold_splitter(year, test_pat, seed, keep_pat=None):
     return _fn
 
 
-def run_cohort(year, folds, seed, init_seeds, root, keep_pat=None, tag="raw", skip_existing=False):
+def run_cohort(year, folds, seed, init_seeds, root, keep_pat=None, tag="raw",
+               skip_existing=True, only_folds=None):
     """한 코호트 K-fold(전 환자 1회 test) × init_seeds → overall·ROI별 환자 bias 벡터.
-    skip_existing 은 arm 별로 run_arm 에 전달(이미 학습된 fold·seed 는 건너뜀)."""
+    skip_existing(기본 True) 은 arm 별로 run_arm 에 전달(이미 학습된 fold·seed 는 건너뜀).
+    only_folds(list, 기본 None=전체) 로 학습·집계할 fold 인덱스를 제한한다(부분 실행)."""
     df = _prep(pd.read_csv(MANIFEST))
     if keep_pat is None:
         fold_list = kfold_patient_folds(df, year, folds, seed)
@@ -245,6 +247,9 @@ def run_cohort(year, folds, seed, init_seeds, root, keep_pat=None, tag="raw", sk
         pats = np.array([p for p in _patients_of(df, year) if p in set(keep_pat)], dtype=object)
         rng = np.random.default_rng(seed); rng.shuffle(pats)
         fold_list = [(k, pats[k::folds]) for k in range(folds)]
+    if only_folds is not None:
+        want = set(only_folds)
+        fold_list = [(k, tp) for (k, tp) in fold_list if k in want]
     keys = ["overall"] + list(ROI)
     bias_pat = {k: {} for k in keys}
     Pall, Yall = [], []
