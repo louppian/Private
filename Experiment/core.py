@@ -71,7 +71,7 @@ MERGED    = Path(f"{BASE}/CXR/Merged")               # labels.csv image_path 의
 IMG_DIR   = Path(f"{BASE}/CXR/Merged/images_normalize")   # ★ seg+STN 정렬 완료 이미지 <uid>.png
 MASK_DIR  = Path(f"{BASE}/CXR/Merged/masks")              # ★ 정렬 마스크 <uid>.png
 CSV_PATH  = f"{BASE}/CXR/Merged/labels.csv"          # uid, patient_id, RT, LT, RB, LB, image_path, …
-MRM_W     = Path("/shared/home/mai/JeongGeon/IEEETMI/weight/MRM.pth")   # ★ 백본 사전학습(MAE/MRM). 서버 실경로 확인 필요
+MRM_W     = Path("/shared/home/mai/JeongGeon/MICCAI2026/MRM.pth")   # ★ 백본 사전학습(MAE/MRM). 서버 실경로 확인 필요
 OUT_ROOT  = Path(_REPO) / "checkpoint" / "E"         # 산출물(가중치+raw) → checkpoint/E/ (gitignore)
 
 # ── 하이퍼파라미터 ──

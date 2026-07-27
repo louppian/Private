@@ -1,0 +1,6 @@
+﻿model,roi,fwd_bias_mean,fwd_bias_sd,rev_bias_mean,rev_bias_sd,flip_Hdata
+dorga,overall,-0.2238,0.0392,0.1205,0.0465,1
+dorga,RT,-0.1496,0.0398,0.0986,0.0387,1
+dorga,LT,-0.2371,0.0212,0.1944,0.0418,1
+dorga,RB,-0.3077,0.0544,0.173,0.0698,1
+dorga,LB,-0.2007,0.0894,0.0159,0.0631,1
