@@ -35,18 +35,19 @@ def run_step(script, extra=()):
 
 
 def _pairs_in(run):
+    # e1_cross.py 산출 규약: {24to26,26to24}_split{k}/test_preds.npz
     pairs = []
-    for fwd in glob.glob(os.path.join(run, "2024to2026_s*", "test_preds.npz")):
-        s = Path(fwd).parent.name.split("_s")[-1]
-        rev = os.path.join(run, f"2026to2024_s{s}", "test_preds.npz")
+    for fwd in glob.glob(os.path.join(run, "24to26_split*", "test_preds.npz")):
+        k = Path(fwd).parent.name.split("_split")[-1]
+        rev = os.path.join(run, f"26to24_split{k}", "test_preds.npz")
         if os.path.exists(rev):
-            pairs.append((fwd, rev, s))
+            pairs.append((fwd, rev, k))
     return pairs
 
 def _cross_seed_pairs():
-    """δ_obs 소스: E1 cross(동일 early-stop 규약, checkpoint/E1/runs/dorga)."""
-    pairs = _pairs_in(str(A.A1_OUT / "E1" / "runs" / "dorga"))
-    return pairs, "E1 cross(early-stop 규약)"
+    """δ_obs 소스: E1 cross(val 5-fold, checkpoint/E1/dorga/{24to26,26to24}_split{k})."""
+    pairs = _pairs_in(str(A.A1_OUT / "E1" / "dorga"))
+    return pairs, "E1 cross(val 5-fold)"
 
 
 def observed_delta():
