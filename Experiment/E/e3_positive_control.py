@@ -49,14 +49,16 @@ def half_cross_splitter(year, train_half, test_half, offset_half, beta, val_seed
     return _fn
 
 
-def run_beta(year, H1, H2, beta, reps, epochs, root):
+def run_beta(year, H1, H2, beta, reps, epochs, root, skip_existing=True):
     """A=H1(오프셋0), B=H2(오프셋β). fwd: train H1→test H2, rev: train H2→test H1."""
     deltas, ss = [], []
     for isd in reps:
         fwd = A.run_arm(f"E3_{year}_beta{beta}_fwd",
-                        half_cross_splitter(year, H1, H2, H2, beta, isd), isd, epochs, root)
+                        half_cross_splitter(year, H1, H2, H2, beta, isd), isd, epochs, root,
+                        skip_existing=skip_existing)
         rev = A.run_arm(f"E3_{year}_beta{beta}_rev",
-                        half_cross_splitter(year, H2, H1, H2, beta, isd), isd, epochs, root)
+                        half_cross_splitter(year, H2, H1, H2, beta, isd), isd, epochs, root,
+                        skip_existing=skip_existing)
         dec = A.decompose(fwd["npz"], rev["npz"], seed=isd)
         deltas.append(dec["delta"]); ss.append(dec["s"])
     return dict(beta=float(beta), delta_mean=float(np.mean(deltas)), delta_sd=float(np.std(deltas)),
@@ -69,13 +71,17 @@ def main():
     ap.add_argument("--betas", type=float, nargs="+", default=[0.0, 0.25, 0.5, 1.0])
     ap.add_argument("--reps", type=int, nargs="+", default=[42, 1, 2])
     ap.add_argument("--half_seed", type=int, default=0)
+    ap.add_argument("--overwrite", dest="skip_existing", action="store_false",
+                    help="기본은 test_preds.npz 있으면 학습 생략(skip-existing 기본 ON). 이 옵션이면 강제 재학습")
+    ap.set_defaults(skip_existing=True)
     args = ap.parse_args()
 
     root = A.A1_OUT / "E3"
     df = A._prep(pd.read_csv(A.MANIFEST))         # year·patient 파생(two_halves 가 df.year 사용)
     H1, H2 = two_halves(df, args.year, args.half_seed)
 
-    curve = [run_beta(args.year, H1, H2, b, args.reps, A.B.EPOCHS, root) for b in args.betas]
+    curve = [run_beta(args.year, H1, H2, b, args.reps, A.B.EPOCHS, root, skip_existing=args.skip_existing)
+             for b in args.betas]
 
     # 복원곡선 선형회귀 (β → δ): 기울기·절편
     bs = np.array([c["beta"] for c in curve]); ds = np.array([c["delta_mean"] for c in curve])

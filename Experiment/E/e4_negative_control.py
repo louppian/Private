@@ -36,14 +36,16 @@ def degraded_splitter(year, train_half, test_half, train_frac, val_seed):
     return _fn
 
 
-def run_frac(year, H1, H2, frac, reps, epochs, root):
+def run_frac(year, H1, H2, frac, reps, epochs, root, skip_existing=True):
     """fwd: train H1(1.0)→test H2,  rev: train H2(frac)→test H1. 약화는 rev(=B=H2)에만."""
     deltas, ss = [], []
     for isd in reps:
         fwd = A.run_arm(f"E4_{year}_frac{frac}_fwd",
-                        degraded_splitter(year, H1, H2, 1.0, isd), isd, epochs, root)
+                        degraded_splitter(year, H1, H2, 1.0, isd), isd, epochs, root,
+                        skip_existing=skip_existing)
         rev = A.run_arm(f"E4_{year}_frac{frac}_rev",
-                        degraded_splitter(year, H2, H1, frac, isd), isd, epochs, root)
+                        degraded_splitter(year, H2, H1, frac, isd), isd, epochs, root,
+                        skip_existing=skip_existing)
         dec = A.decompose(fwd["npz"], rev["npz"], seed=isd)
         deltas.append(dec["delta"]); ss.append(dec["s"])
     return dict(train_frac=float(frac), delta_spurious=float(np.mean(deltas)),
@@ -56,13 +58,17 @@ def main():
     ap.add_argument("--fracs", type=float, nargs="+", default=[1.0, 0.5, 0.25])
     ap.add_argument("--reps", type=int, nargs="+", default=[42, 1, 2])
     ap.add_argument("--half_seed", type=int, default=0)
+    ap.add_argument("--overwrite", dest="skip_existing", action="store_false",
+                    help="기본은 test_preds.npz 있으면 학습 생략(skip-existing 기본 ON). 이 옵션이면 강제 재학습")
+    ap.set_defaults(skip_existing=True)
     args = ap.parse_args()
 
     root = A.A1_OUT / "E4"
     df = A._prep(pd.read_csv(A.MANIFEST))         # year·patient 파생(two_halves 가 df.year 사용)
     H1, H2 = two_halves(df, args.year, args.half_seed)
 
-    curve = [run_frac(args.year, H1, H2, f, args.reps, A.B.EPOCHS, root) for f in args.fracs]
+    curve = [run_frac(args.year, H1, H2, f, args.reps, A.B.EPOCHS, root, skip_existing=args.skip_existing)
+             for f in args.fracs]
     out = dict(year=int(args.year), n_H1=len(H1), n_H2=len(H2), curve=curve,
                note="참 δ=0. frac↓ 일수록 δ_spurious 가 0 에서 벗어나면 A1 위반이 δ 로 누출됨을 뜻함.")
 
