@@ -50,8 +50,10 @@ def half_cross_splitter(year, train_half, test_half, offset_half, beta, val_seed
 
 
 def run_beta(year, H1, H2, beta, reps, epochs, root, skip_existing=True):
-    """A=H1(오프셋0), B=H2(오프셋β). fwd: train H1→test H2, rev: train H2→test H1."""
-    deltas, ss = [], []
+    """A=H1(오프셋0), B=H2(오프셋β). fwd: train H1→test H2, rev: train H2→test H1.
+    overall + ROI별 δ·s(모델) 복원."""
+    keys = ["overall"] + list(A.ROI)
+    accd = {k: [] for k in keys}; accs = {k: [] for k in keys}
     for isd in reps:
         fwd = A.run_arm(f"E3_{year}_beta{beta}_fwd",
                         half_cross_splitter(year, H1, H2, H2, beta, isd), isd, epochs, root,
@@ -59,10 +61,15 @@ def run_beta(year, H1, H2, beta, reps, epochs, root, skip_existing=True):
         rev = A.run_arm(f"E3_{year}_beta{beta}_rev",
                         half_cross_splitter(year, H2, H1, H2, beta, isd), isd, epochs, root,
                         skip_existing=skip_existing)
-        dec = A.decompose(fwd["npz"], rev["npz"], seed=isd)
-        deltas.append(dec["delta"]); ss.append(dec["s"])
-    return dict(beta=float(beta), delta_mean=float(np.mean(deltas)), delta_sd=float(np.std(deltas)),
-                s_mean=float(np.mean(ss)), s_sd=float(np.std(ss)), deltas=deltas, ss=ss)
+        for k in keys:
+            dec = A.decompose(fwd["npz"], rev["npz"], roi=(None if k == "overall" else k), seed=isd)
+            accd[k].append(dec["delta"]); accs[k].append(dec["s"])
+    return dict(beta=float(beta),
+                delta_mean=float(np.mean(accd["overall"])), delta_sd=float(np.std(accd["overall"])),
+                s_mean=float(np.mean(accs["overall"])), s_sd=float(np.std(accs["overall"])),
+                deltas=accd["overall"], ss=accs["overall"],
+                delta_roi={k: float(np.mean(accd[k])) for k in A.ROI},
+                s_roi={k: float(np.mean(accs[k])) for k in A.ROI})
 
 
 def main():
@@ -92,10 +99,12 @@ def main():
                verdict="기울기≈1·절편≈0 이면 추정기 무편향 (A1-참 조건 검증됨)")
 
     A.save_json(out, A.RESULT_OUT / "E3" / "e3_summary.json")
-    print("\n" + "=" * 70)
-    print(f"{'β 주입':>8}{'δ 복원':>12}{'s(모델)':>12}")
+    print("\n" + "=" * 78)
+    print(f"{'β 주입':>8}{'δ overall':>11}" + "".join(f"{r:>8}" for r in A.ROI) + f"{'γ':>9}")
     for c in curve:
-        print(f"{c['beta']:>8.2f}{c['delta_mean']:>+12.4f}{c['s_mean']:>+12.4f}")
+        dr = c["delta_roi"]
+        print(f"{c['beta']:>8.2f}{c['delta_mean']:>+11.4f}"
+              + "".join(f"{dr[r]:>+8.3f}" for r in A.ROI) + f"{c['s_mean']:>+9.3f}")
     print(f"\n복원곡선: δ ≈ {slope:.3f}·β + {intercept:+.3f}  (이상적 1·0)")
     print("saved:", A.RESULT_OUT / "E3" / "e3_summary.json")
 
