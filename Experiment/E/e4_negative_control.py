@@ -10,7 +10,7 @@ E4 — 반합성 음성 대조 (학습량 비대칭, 누출곡선)   [draft §5.
 활용: E1 관측 δ·E2/E3 Δg 를 이 곡선에 대입 → 실데이터 δ 의 오염 추정.
       (선택: 영상 블러/노이즈 변형은 InhaUHMaskDataset 훅이 필요 — 본 스크립트는 데이터량 비대칭 사용.)
 
-실행:  python e5_negative_control.py --year 2024 --fracs 1.0 0.5 0.25 --reps 42 1 2 --epochs 50
+실행:  python e4_negative_control.py --year 2024 --fracs 1.0 0.5 0.25 --reps 42 1 2 --epochs 50
 산출:  checkpoint/E4/ (가중치·npz) + Result/E4/ (per-run json) + Result/E4/e4_summary.json (누출곡선)
 """
 import argparse, os as _os, sys as _sys

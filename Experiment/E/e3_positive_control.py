@@ -10,7 +10,7 @@ E3 — 반합성 양성 대조 (β 오프셋 주입, 복원곡선)   [draft §5.
 판정: 복원곡선(주입 β vs 추정 δ) 기울기 1·절편 0. 이탈분 = 추정기 편향.
       (clip(0,C-1) 때문에 큰 β 에서 기울기 감쇠 — 곡선이 그 지점을 드러낸다.)
 
-실행:  python e4_positive_control.py --year 2024 --betas 0 0.25 0.5 1.0 --reps 42 1 2 --epochs 50
+실행:  python e3_positive_control.py --year 2024 --betas 0 0.25 0.5 1.0 --reps 42 1 2 --epochs 50
 산출:  checkpoint/E3/ (가중치·npz) + Result/E3/ (per-run json) + Result/E3/e3_summary.json (복원곡선)
 """
 import argparse, os as _os, sys as _sys
