@@ -62,10 +62,10 @@
 | 실험 | 설계 | 산출 |
 |---|---|---|
 | **E1** cross | **val 5-fold(8:2) 비중복.** 방향마다 train연도를 5-fold → fold k=val(20%)·나머지=train(80%), **test=반대연도 전체(고정)**. split 1~5. fwd(2024→2026)·rev(2026→2024). δ_obs=(rev−fwd)/2, γ=(rev+fwd)/2, split 평균 | `checkpoint/E1/dorga/{24to26,26to24}_split{1..5}/` |
-| **E2** in-domain raw | 코호트별 환자 5-fold(전 환자 1회 test) × init_seeds 42·1·2, **fold 내 8:2 val**. **raw**(전 환자). Δg_raw = g₂₀₂₄ − g₂₀₂₆ | `checkpoint/E2/dorga/` + `e2_summary.json` |
-| **E3** in-domain matched | E2와 동일하나 **matched**(두 코호트 등급분포 정합 서브샘플)만. Δg_matched. 수축분 = Δg_raw − Δg_matched | `checkpoint/E3/dorga/` + `e3_summary.json` |
-| **E4** 양성대조 | 한 코호트(2024)를 정합 두 반쪽 H1·H2. H2에 오프셋 β ∈ {0, 0.25, 0.5, 1.0} 주입. reps 42·1·2. 복원곡선(β→δ) 기울기·절편 | `checkpoint/E4/` + `e4_summary.json` |
-| **E5** 음성대조 | β=0, 학습량 비대칭 train_frac ∈ {1.0, 0.5, 0.25}. reps 42·1·2. δ_spurious 누출 | `checkpoint/E5/` + `e5_summary.json` |
+| **E2** in-domain matched | 코호트별 환자 5-fold(전 환자 1회 test) × init_seeds 42·1·2, **fold 내 8:2 val**. **matched**(두 코호트 등급분포 정합 서브샘플). Δg_matched = g₂₀₂₄ − g₂₀₂₆ | `checkpoint/E2/dorga/` + `e2_summary.json` |
+| **E3** 양성대조 | 한 코호트(2024)를 정합 두 반쪽 H1·H2. H2에 오프셋 β ∈ {0, 0.25, 0.5, 1.0} 주입. reps 42·1·2. 복원곡선(β→δ) 기울기·절편 | `checkpoint/E3/` + `e3_summary.json` |
+| **E4** 음성대조 | β=0, 학습량 비대칭 train_frac ∈ {1.0, 0.5, 0.25}. reps 42·1·2. δ_spurious 누출 | `checkpoint/E4/` + `e4_summary.json` |
+| **부록 B** in-domain raw | E2와 동일하나 **raw**(전 환자, 정합 전). Δg_raw. 수축분 = Δg_raw − Δg_matched | `checkpoint/AppendixB/dorga/` + `appb_summary.json` |
 
 판정: δ_corr = δ_obs + Δg/2 (E3 matched). `E/summary.py` → `A1_verdict.json` (+CI).
 
@@ -93,10 +93,10 @@
 ```bash
 python Experiment/E/e1_cross.py                       # fwd·rev × split 1~5 (10 arm)
 python Experiment/E/e1_cross.py --mode fwd --split 1  # 특정 방향·split 만
-python Experiment/E/e2_indomain_raw.py --folds 5 --init_seeds 42 1 2      # E2 raw
-python Experiment/E/e3_indomain_matched.py --folds 5 --init_seeds 42 1 2  # E3 matched
-python Experiment/E/e4_positive_control.py --year 2024 --betas 0 0.25 0.5 1.0 --reps 42 1 2
-python Experiment/E/e5_negative_control.py --year 2024 --fracs 1.0 0.5 0.25 --reps 42 1 2
+python Experiment/E/e2_indomain_matched.py --folds 5 --init_seeds 42 1 2  # E2 matched
+python Experiment/E/e3_positive_control.py --year 2024 --betas 0 0.25 0.5 1.0 --reps 42 1 2  # E3 양성
+python Experiment/E/e4_negative_control.py --year 2024 --fracs 1.0 0.5 0.25 --reps 42 1 2    # E4 음성
+python Experiment/E/appendixB_indomain_raw.py --folds 5 --init_seeds 42 1 2  # 부록 B raw
 
 python Experiment/L/l1_structure.py
 python Experiment/L/l2_label_image.py

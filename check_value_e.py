@@ -60,9 +60,9 @@ def check_e1(rec, tol):
 
 def check_e2(rec, tol):
     print("\n" + "=" * 76); print("[E2] raw in-domain Δg_raw (§5.2 raw)"); print("=" * 76)
-    e2 = _load("E2/e2_summary.json")
+    e2 = _load("AppendixB/appb_summary.json")
     if not e2:
-        print("  [SKIP] Result/E2/e2_summary.json 없음 — e2_indomain_raw.py 실행 후"); return
+        print("  [SKIP] Result/AppendixB/appb_summary.json 없음 — appendixB_indomain_raw.py 실행 후"); return
     r = e2.get("A1_test", {})
     if not r:
         print("  [SKIP] A1_test 키 없음"); return
@@ -72,9 +72,9 @@ def check_e2(rec, tol):
 
 def check_e3(rec, tol):
     print("\n" + "=" * 76); print("[E3] 정합 in-domain Δγ_matched (§5.2)"); print("=" * 76)
-    e3 = _load("E3/e3_summary.json")
+    e3 = _load("E2/e2_summary.json")
     if not e3:
-        print("  [SKIP] Result/E3/e3_summary.json 없음 — e3_indomain_matched.py 실행 후"); return
+        print("  [SKIP] Result/E2/e2_summary.json 없음 — e2_indomain_matched.py 실행 후"); return
     m = e3.get("A1_test_matched", {})
     if not m:
         print("  [SKIP] A1_test_matched 키 없음"); return
@@ -93,9 +93,9 @@ def check_e3(rec, tol):
 
 def check_e4(rec, tol):
     print("\n" + "=" * 76); print("[E4] 양성대조 복원곡선 (§5.1)"); print("=" * 76)
-    e4 = _load("E4/e4_summary.json")
+    e4 = _load("E3/e3_summary.json")
     if not e4:
-        print("  [SKIP] Result/E4/e4_summary.json 없음 — e4_positive_control.py 실행 후"); return
+        print("  [SKIP] Result/E3/e3_summary.json 없음 — e3_positive_control.py 실행 후"); return
     slope = e4.get("recovery_slope"); inter = e4.get("recovery_intercept", e4.get("intercept"))
     if slope is None:
         print("  [SKIP] recovery_slope 키 없음"); return
@@ -108,9 +108,9 @@ def check_e4(rec, tol):
 
 def check_e5(rec, tol):
     print("\n" + "=" * 76); print("[E5] 음성대조 누출 (§5.3)"); print("=" * 76)
-    e5 = _load("E5/e5_summary.json")
+    e5 = _load("E4/e4_summary.json")
     if not e5:
-        print("  [SKIP] Result/E5/e5_summary.json 없음 — e5_negative_control.py 실행 후"); return
+        print("  [SKIP] Result/E4/e4_summary.json 없음 — e4_negative_control.py 실행 후"); return
     got = {round(c["train_frac"], 2): c["delta_spurious"] for c in e5.get("curve", [])}
     for frac, ref in REF_E4.items():
         if frac not in got:

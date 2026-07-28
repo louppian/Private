@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 r"""
-E4 — 반합성 양성 대조   [A1_검증실험계획 §3 E3 → 재번호 E4]
+E3 — 반합성 양성 대조 (β 오프셋 주입, 복원곡선)   [draft §5.1 = Experiment 3]
 
 목적: A1 이 '참인 조건'에서 방향 반전 분해가 주입한 라벨 오프셋 β 를 정확히 복원하는가.
 설계: 한 코호트(기본 2024)를 등급분포 정합된 두 반쪽 H1,H2 로 나눔(→ 구성상 g_f=g_r, A1 성립).
@@ -11,7 +11,7 @@ E4 — 반합성 양성 대조   [A1_검증실험계획 §3 E3 → 재번호 E4]
       (clip(0,C-1) 때문에 큰 β 에서 기울기 감쇠 — 곡선이 그 지점을 드러낸다.)
 
 실행:  python e4_positive_control.py --year 2024 --betas 0 0.25 0.5 1.0 --reps 42 1 2 --epochs 50
-산출:  checkpoint/E4/ (가중치·npz) + Result/E4/ (per-run json) + Result/E4/e4_summary.json (복원곡선)
+산출:  checkpoint/E3/ (가중치·npz) + Result/E3/ (per-run json) + Result/E3/e3_summary.json (복원곡선)
 """
 import argparse, os as _os, sys as _sys
 import numpy as np
@@ -53,9 +53,9 @@ def run_beta(year, H1, H2, beta, reps, epochs, root):
     """A=H1(오프셋0), B=H2(오프셋β). fwd: train H1→test H2, rev: train H2→test H1."""
     deltas, ss = [], []
     for isd in reps:
-        fwd = A.run_arm(f"E4_{year}_beta{beta}_fwd",
+        fwd = A.run_arm(f"E3_{year}_beta{beta}_fwd",
                         half_cross_splitter(year, H1, H2, H2, beta, isd), isd, epochs, root)
-        rev = A.run_arm(f"E4_{year}_beta{beta}_rev",
+        rev = A.run_arm(f"E3_{year}_beta{beta}_rev",
                         half_cross_splitter(year, H2, H1, H2, beta, isd), isd, epochs, root)
         dec = A.decompose(fwd["npz"], rev["npz"], seed=isd)
         deltas.append(dec["delta"]); ss.append(dec["s"])
@@ -71,7 +71,7 @@ def main():
     ap.add_argument("--half_seed", type=int, default=0)
     args = ap.parse_args()
 
-    root = A.A1_OUT / "E4"
+    root = A.A1_OUT / "E3"
     df = A._prep(pd.read_csv(A.MANIFEST))         # year·patient 파생(two_halves 가 df.year 사용)
     H1, H2 = two_halves(df, args.year, args.half_seed)
 
@@ -85,13 +85,13 @@ def main():
                s_grand=float(np.mean([c["s_mean"] for c in curve])),
                verdict="기울기≈1·절편≈0 이면 추정기 무편향 (A1-참 조건 검증됨)")
 
-    A.save_json(out, A.RESULT_OUT / "E4" / "e4_summary.json")
+    A.save_json(out, A.RESULT_OUT / "E3" / "e3_summary.json")
     print("\n" + "=" * 70)
     print(f"{'β 주입':>8}{'δ 복원':>12}{'s(모델)':>12}")
     for c in curve:
         print(f"{c['beta']:>8.2f}{c['delta_mean']:>+12.4f}{c['s_mean']:>+12.4f}")
     print(f"\n복원곡선: δ ≈ {slope:.3f}·β + {intercept:+.3f}  (이상적 1·0)")
-    print("saved:", A.RESULT_OUT / "E4" / "e4_summary.json")
+    print("saved:", A.RESULT_OUT / "E3" / "e3_summary.json")
 
 
 if __name__ == "__main__":

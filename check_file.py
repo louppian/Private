@@ -69,9 +69,10 @@ check("core.py", _imp_core)
 for rel, name in [
     ("Experiment/E/e_common.py", "e_common"),
     ("Experiment/E/e1_cross.py", "e1_cross"),
-    ("Experiment/E/e2_indomain.py", "e2_indomain"),
+    ("Experiment/E/e2_indomain_matched.py", "e2_indomain_matched"),
     ("Experiment/E/e3_positive_control.py", "e3_positive_control"),
     ("Experiment/E/e4_negative_control.py", "e4_negative_control"),
+    ("Experiment/E/appendixB_indomain_raw.py", "appendixB_indomain_raw"),
     ("Experiment/E/summary.py", "e_summary"),
     ("Experiment/L/summary.py", "l_summary"),
 ]:
