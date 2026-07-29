@@ -268,10 +268,20 @@ def select_cases(rows, rng):
         by_patient, target_keys, [k for k in keys24 if has(k, (0, 1))], cap, rng)
 
     store = {}
+    # §3.4 분기별 환자 수: 3·4 영상이 SHORT_RUN_MAX 이하면 구간 전부, 넘으면 대표영상만
+    branch = {"2024": Counter(), "2026": Counter()}
+
+    def branch_of(grades):
+        n34 = sum(1 for g in grades if g in (3, 4))
+        return ("short" if n34 <= SHORT_RUN_MAX else "long"), n34
+
     # 표적군 — 2024 기존 등급 3·4 (등급 3 은 하위 경계 대조군과 공유)
     for key in target_keys:
         seq = by_patient[key]
         grades = [r["_grade"] for r in seq]
+        b, n34 = branch_of(grades)
+        branch["2024"][b] += 1
+        branch["2024"][b + "_imgs"] += n34
         for i, why in upper_minisequence(grades, full=TARGET_FULL_ENUMERATION).items():
             mark(store, seq[i], {"target_2024_rb_upper": int(grades[i] in (3, 4)),
                                  "control_2024_rb_lower": int(grades[i] == 3)}, why)
@@ -280,6 +290,9 @@ def select_cases(rows, rng):
     for key in year_keys:
         seq = by_patient[key]
         grades = [r["_grade"] for r in seq]
+        b, n34 = branch_of(grades)
+        branch["2026"][b] += 1
+        branch["2026"][b + "_imgs"] += n34
         for i, why in upper_minisequence(grades).items():
             mark(store, seq[i], {"control_2026_rb_upper": int(grades[i] in (3, 4))}, why)
 
@@ -303,7 +316,13 @@ def select_cases(rows, rng):
         rec["_patient_total"] = len(by_patient[(rec["_year"], rec["_patient"])])
     return store, {"target": len(target_keys), "year_ctl": len(year_keys),
                    "lower_ctl": len(lower_keys), "distant_ctl": len(distant_keys),
-                   "control_cap": cap}
+                   "control_cap": cap,
+                   "minisequence_branch": {
+                       y: {"short_patients": branch[y]["short"],
+                           "short_images_34": branch[y]["short_imgs"],
+                           "long_patients": branch[y]["long"],
+                           "long_images_34": branch[y]["long_imgs"]}
+                       for y in ("2024", "2026")}}
 
 
 def primary_group(members):
@@ -541,6 +560,15 @@ def report(summary, admin):
     print(f"\n  [대조군 환자 층화]  상한 {pc['control_cap']}명 (= 표적군 환자 수)")
     print(f"    표적군 {pc['target']}명 · 연도대조 {pc['year_ctl']}명 · "
           f"하위대조 {pc['lower_ctl']}명 · 원거리대조 {pc['distant_ctl']}명")
+
+    print("\n  [§3.4 분기별 환자 수]  기존 등급 3·4 영상 수 기준")
+    print(f"    {'연도':<8}{'5장 이하':>10}{'(3·4 영상)':>12}"
+          f"{'6장 이상':>10}{'(3·4 영상)':>12}")
+    for y in ("2024", "2026"):
+        b = pc["minisequence_branch"][y]
+        tag = "표적군" if y == "2024" else "연도대조"
+        print(f"    {y} {tag:<4}{b['short_patients']:>8}명{b['short_images_34']:>10}장"
+              f"{b['long_patients']:>8}명{b['long_images_34']:>10}장")
 
     print("\n  [§3.4 mini-sequence]")
     lens = Counter(int(a["minisequence_len"]) for a in admin)
