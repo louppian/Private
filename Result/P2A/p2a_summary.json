@@ -13,7 +13,21 @@
     "year_ctl": 33,
     "lower_ctl": 45,
     "distant_ctl": 45,
-    "control_cap": 45
+    "control_cap": 45,
+    "minisequence_branch": {
+      "2024": {
+        "short_patients": 28,
+        "short_images_34": 62,
+        "long_patients": 17,
+        "long_images_34": 141
+      },
+      "2026": {
+        "short_patients": 21,
+        "short_images_34": 56,
+        "long_patients": 12,
+        "long_images_34": 121
+      }
+    }
   },
   "time_columns_used": [
     "uid"
