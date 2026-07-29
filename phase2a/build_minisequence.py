@@ -125,8 +125,12 @@ def source_path(row, has_image_col):
 
 # ────────────────────────────── §3.4 mini-sequence ──────────────────────────────
 
-def upper_minisequence(grades):
-    """기존 등급 3·4 구간의 mini-sequence. {index: 선정사유} 반환."""
+def upper_minisequence(grades, full=False):
+    """기존 등급 3·4 구간의 mini-sequence. {index: 선정사유} 반환.
+
+    full=True 는 §3.2 전수 열거이며 표적군(2024)에만 쓴다. 연도 대조군(2026)은
+    §3.2 가 "환자 층화" 라고만 규정하므로 항상 §3.4 규칙을 따른다.
+    """
     n = len(grades)
     target = [i for i in range(n) if grades[i] in (3, 4)]
     if not target:
@@ -135,7 +139,7 @@ def upper_minisequence(grades):
     anchors = [i for i in (target[0] - 1, target[-1] + 1) if 0 <= i < n]
 
     # 5장 이하: 직전 1장 + 구간 전부 + 직후 1장
-    if len(target) <= SHORT_RUN_MAX or TARGET_FULL_ENUMERATION:
+    if len(target) <= SHORT_RUN_MAX or full:
         out = {i: "target" for i in target}
         out.update({i: "anchor" for i in anchors if i not in out})
         return dict(sorted(out.items()))
@@ -268,7 +272,7 @@ def select_cases(rows, rng):
     for key in target_keys:
         seq = by_patient[key]
         grades = [r["_grade"] for r in seq]
-        for i, why in upper_minisequence(grades).items():
+        for i, why in upper_minisequence(grades, full=TARGET_FULL_ENUMERATION).items():
             mark(store, seq[i], {"target_2024_rb_upper": int(grades[i] in (3, 4)),
                                  "control_2024_rb_lower": int(grades[i] == 3)}, why)
 
