@@ -29,9 +29,9 @@ REF_L1 = {
     2024: {"n_pat": 68, "n_img": 718, "seq": 10.56, "mean": 1.640, "g0": 0.165, "g4": 0.093},
     2026: {"n_pat": 46, "n_img": 587, "seq": 12.76, "mean": 1.427, "g0": 0.236, "g4": 0.070},
 }
-# ── draft §4.3 표2 (L2) 3→4 경계 최고 AUC ──
-REF_L2 = {2024: {"RT": 0.657, "RB": 0.631, "LT": 0.926, "LB": 0.831},
-          2026: {"RT": 0.876, "RB": 0.837, "LT": 0.930, "LB": 0.843}}
+# ── draft §4.3 표2 (L2) 3→4 경계 최고 AUC (6-특징 배터리) ──
+REF_L2 = {2024: {"RT": 0.649, "RB": 0.604, "LT": 0.833, "LB": 0.791},
+          2026: {"RT": 0.890, "RB": 0.818, "LT": 0.897, "LB": 0.826}}
 # ── draft §4.4 표3/4 (L3) ──
 REF_BIAS = {"fwd": -0.224, "rev": +0.120}                       # §4.4 표3 (새 백본)
 REF_L3 = {"overall": (+0.172, -0.052), "RT": (+0.124, -0.026),
@@ -141,9 +141,8 @@ def main():
     PASS, FAIL = [], []
     rec = lambda ok, n: (PASS if ok else FAIL).append(n)
     print("=" * 76); print(f"check_value_L — draft §4 L 사다리 대조 (TOL ±{a.tol})"); print("=" * 76)
-    # L2 는 순열보정(귀무 max 분포) 미구현 + 양자화 규약차로 draft 표2 AUC 와 불일치 → 대조 skip.
-    #   TODO: S7 노트북 규약으로 perm 보정 구현 후 check_l2 재활성화.
-    check_l1(a.csv, rec, a.tol); check_l3(rec, a.tol); check_l4(rec, a.tol)
+    # L2 는 6-특징 배터리 + 귀무 max 순열보정 구현(l2_label_image.py) → 표2 대조 재활성화.
+    check_l1(a.csv, rec, a.tol); check_l2(rec, a.tol); check_l3(rec, a.tol); check_l4(rec, a.tol)
     print("\n" + "=" * 76); print(f"결과(L): PASS {len(PASS)} · FAIL {len(FAIL)}")
     for n in FAIL: print(f"  - {n}")
     print("=" * 76); sys.exit(1 if FAIL else 0)
