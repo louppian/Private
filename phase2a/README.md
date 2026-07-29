@@ -49,8 +49,17 @@ python phase2a/power_simulation.py
 | `p2a_image_manifest.csv` | `case_id` → Merged 원본 경로 |
 | `p2a_summary.json` | 대상군별 영상·환자 수 |
 
-주요 상수: `SHORT_RUN_MAX`, `MAX_MINISEQ`, `CONTROL_SEQ_LEN`, `DUPLICATE_FRAC`,
-`MIN_DUP_GAP`, `TARGET_FULL_ENUMERATION`, `SEED`.
+주요 상수: `SHORT_RUN_MAX`, `MAX_MINISEQ`, `CONTROL_SEQ_LEN`, `CONTROL_MAX_PATIENTS`,
+`STRATA_BINS`, `DUPLICATE_FRAC`, `MIN_DUP_GAP`, `TARGET_FULL_ENUMERATION`, `SEED`.
+
+**대조군 환자 층화(§3.2).** 조건 맞는 환자를 전부 넣으면 2024 는 사실상 전원(68명)이
+되어 표적군 45명보다 대조군이 커진다. 하위 경계·원거리 음성 대조군은 표적군 환자 수를
+상한으로(`CONTROL_MAX_PATIENTS = None` 이면 동수) 표적군의 (시퀀스 길이 × 환자 평균
+등급) 층 분포에 맞춰 뽑는다.
+
+**hidden duplicate 비율 기준.** `duplicates / 원본 판독 대상(중복 제외)` 으로 고정한다.
+최종 행 수를 분모로 쓰면 quota 와 출력이 어긋난다. mini-sequence 단위라 정확히 10% 를
+맞출 수 없으므로 **초과하지 않는 쪽**을 택한다.
 
 **§3.2 와 §3.4 가 충돌한다.** §3.2 는 표적군을 "203 ROI 전부" 로 규정하는데 §3.4 는
 3·4 영상이 6장 이상인 환자에서 대표영상만 뽑으라고 한다. 2024 기준 45명 중 17명이

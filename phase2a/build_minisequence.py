@@ -57,6 +57,13 @@ SHORT_RUN_MAX = 5                  # 3·4 영상이 이 수 이하면 "구간 �
 MAX_MINISEQ = 7                    # 6장 이상 분기의 환자당 상한 (plan 6~7)
 CONTROL_SEQ_LEN = 5                # 대조군 환자당 연속 영상 수 (plan 3~5)
 
+# §3.2 대조군은 "환자·등급 층화" 선정이다. 조건 맞는 환자를 전부 넣으면 2024 는
+# 사실상 전원(68명)이 되어 표적군 45명보다 대조군이 커진다.
+CONTROL_MAX_PATIENTS = None        # None 이면 표적군 환자 수와 동수
+STRATA_BINS = 3                    # 시퀀스 길이·환자 평균 등급 각각의 분위 수
+
+# hidden duplicate 비율 기준: 원본 판독 대상(중복 제외) 대비 비율로 고정한다.
+# "전체 판독 세트의 10%" 를 최종 행 수 기준으로 읽으면 quota 와 출력이 어긋난다.
 # §3.2 는 표적군을 "203 ROI 전부" 로, §3.4 는 6장 이상 환자에서 대표영상만 뽑도록
 # 규정한다. 두 조항이 충돌하므로 어느 쪽을 따를지 여기서 정한다.
 #   False  §3.4 우선 — 6장 이상 환자는 대표영상만 (표적군이 203 미만이 된다)
@@ -178,6 +185,62 @@ def mark(store, row, flags, reason):
         rec[k] = max(int(rec.get(k, 0)), int(v))
 
 
+def profile(seq):
+    """환자 프로파일 — (시퀀스 길이, 환자 평균 등급)."""
+    g = [r["_grade"] for r in seq]
+    return len(seq), sum(g) / len(g)
+
+
+def quantile_edges(vals, k):
+    """분위 경계. 동률이 많으면 실제 층 수가 k 보다 줄어든다."""
+    if not vals:
+        return []
+    s = sorted(vals)
+    return [s[min(int(i / k * len(s)), len(s) - 1)] for i in range(1, k)]
+
+
+def to_bin(v, edges):
+    return sum(1 for e in edges if v > e)
+
+
+def choose_control_patients(by_patient, target_keys, eligible, cap, rng):
+    """§3.2 환자·등급 층화 — 표적군의 (시퀀스 길이 × 평균 등급) 층 분포에 맞춰 뽑는다."""
+    if not eligible or cap <= 0:
+        return set()
+    prof = {k: profile(by_patient[k]) for k in set(target_keys) | set(eligible)}
+    len_edges = quantile_edges([prof[k][0] for k in target_keys], STRATA_BINS)
+    gr_edges = quantile_edges([prof[k][1] for k in target_keys], STRATA_BINS)
+
+    def stratum(k):
+        n, m = prof[k]
+        return to_bin(n, len_edges), to_bin(m, gr_edges)
+
+    want = Counter(stratum(k) for k in target_keys)
+    n_target = max(sum(want.values()), 1)
+
+    pool = defaultdict(list)
+    for k in eligible:
+        pool[stratum(k)].append(k)
+    for s in pool:
+        pool[s].sort()
+        rng.shuffle(pool[s])
+
+    chosen = set()
+    for s, c in sorted(want.items()):
+        take = int(round(cap * c / n_target))
+        chosen.update(pool[s][:take])
+        pool[s] = pool[s][take:]
+
+    # 층이 비어 못 채운 몫은 남은 환자에서 무작위로 채운다.
+    rest = [k for s in sorted(pool) for k in pool[s]]
+    rng.shuffle(rest)
+    for k in rest:
+        if len(chosen) >= cap:
+            break
+        chosen.add(k)
+    return chosen
+
+
 def select_cases(rows, rng):
     by_patient = defaultdict(list)
     for r in rows:
@@ -186,34 +249,57 @@ def select_cases(rows, rng):
     for k in by_patient:
         by_patient[k].sort(key=lambda r: sort_key(r, r["_time_cols"]))
 
+    def has(key, grades):
+        return any(r["_grade"] in grades for r in by_patient[key])
+
+    keys24 = sorted(k for k in by_patient if k[0] == "2024")
+    keys26 = sorted(k for k in by_patient if k[0] == "2026")
+
+    target_keys = [k for k in keys24 if has(k, (3, 4))]
+    year_keys = [k for k in keys26 if has(k, (3, 4))]
+    cap = CONTROL_MAX_PATIENTS if CONTROL_MAX_PATIENTS else len(target_keys)
+    lower_keys = choose_control_patients(
+        by_patient, target_keys, [k for k in keys24 if has(k, (2,))], cap, rng)
+    distant_keys = choose_control_patients(
+        by_patient, target_keys, [k for k in keys24 if has(k, (0, 1))], cap, rng)
+
     store = {}
-    for (year, _pat), seq in sorted(by_patient.items()):
+    # 표적군 — 2024 기존 등급 3·4 (등급 3 은 하위 경계 대조군과 공유)
+    for key in target_keys:
+        seq = by_patient[key]
         grades = [r["_grade"] for r in seq]
-        n = len(seq)
+        for i, why in upper_minisequence(grades).items():
+            mark(store, seq[i], {"target_2024_rb_upper": int(grades[i] in (3, 4)),
+                                 "control_2024_rb_lower": int(grades[i] == 3)}, why)
 
-        if year == "2024":
-            # 표적군 + 하위 경계 대조군의 등급 3 공유
-            for i, why in upper_minisequence(grades).items():
-                mark(store, seq[i], {
-                    "target_2024_rb_upper": int(grades[i] in (3, 4)),
-                    "control_2024_rb_lower": int(grades[i] == 3),
-                }, why)
+    # 연도 대조군 — 2026 기존 등급 3·4
+    for key in year_keys:
+        seq = by_patient[key]
+        grades = [r["_grade"] for r in seq]
+        for i, why in upper_minisequence(grades).items():
+            mark(store, seq[i], {"control_2026_rb_upper": int(grades[i] in (3, 4))}, why)
 
-            # 하위 경계 대조군 — 기존 등급 2
-            for i in control_minisequence(grades, {i for i in range(n) if grades[i] == 2}, rng):
-                mark(store, seq[i], {"control_2024_rb_lower": int(grades[i] in (2, 3))}, "lower_ctl")
+    # 하위 경계 대조군 — 2024 기존 등급 2
+    for key in sorted(lower_keys):
+        seq = by_patient[key]
+        grades = [r["_grade"] for r in seq]
+        elig = {i for i in range(len(seq)) if grades[i] == 2}
+        for i in control_minisequence(grades, elig, rng):
+            mark(store, seq[i], {"control_2024_rb_lower": int(grades[i] in (2, 3))}, "lower_ctl")
 
-            # 원거리 음성 대조군 — 기존 등급 0·1
-            for i in control_minisequence(grades, {i for i in range(n) if grades[i] in (0, 1)}, rng):
-                mark(store, seq[i], {"control_2024_rb_distant": int(grades[i] in (0, 1))}, "distant_ctl")
-
-        else:  # 연도 대조군 — 2026 기존 등급 3·4
-            for i, why in upper_minisequence(grades).items():
-                mark(store, seq[i], {"control_2026_rb_upper": int(grades[i] in (3, 4))}, why)
+    # 원거리 음성 대조군 — 2024 기존 등급 0·1
+    for key in sorted(distant_keys):
+        seq = by_patient[key]
+        grades = [r["_grade"] for r in seq]
+        elig = {i for i in range(len(seq)) if grades[i] in (0, 1)}
+        for i in control_minisequence(grades, elig, rng):
+            mark(store, seq[i], {"control_2024_rb_distant": int(grades[i] in (0, 1))}, "distant_ctl")
 
     for rec in store.values():
         rec["_patient_total"] = len(by_patient[(rec["_year"], rec["_patient"])])
-    return store
+    return store, {"target": len(target_keys), "year_ctl": len(year_keys),
+                   "lower_ctl": len(lower_keys), "distant_ctl": len(distant_keys),
+                   "control_cap": cap}
 
 
 def primary_group(members):
@@ -237,26 +323,29 @@ def build_sequences(store, rng):
         seqs.append({"sid": "S" + blind, "blind_patient": blind, "src_key": key,
                      "members": members, "dup_of": ""})
 
-    # 대상군 구성비를 유지한 채 전체 영상의 10% 만큼 시퀀스를 재제시한다(§3.2 층화).
+    # 대상군 구성비를 유지한 채 원본 판독 대상의 10% 만큼 시퀀스를 재제시한다(§3.2 층화).
+    # mini-sequence 단위라 정확히 10% 를 못 맞추므로 "초과하지 않음" 을 우선한다.
     total = sum(len(s["members"]) for s in seqs)
     quota = round(total * DUPLICATE_FRAC)
     strata = defaultdict(list)
     for s in seqs:
         strata[primary_group(s["members"])].append(s)
 
-    dups = []
+    dups, used = [], 0
     for name in sorted(strata):
         pool = strata[name][:]
         rng.shuffle(pool)
         share = quota * sum(len(s["members"]) for s in strata[name]) / max(total, 1)
         taken = 0
         for s in pool:
-            if taken >= share:
-                break
+            n = len(s["members"])
+            if taken + n > share or used + n > quota:
+                continue
             blind = "P" + hash_id(f"dup|{s['src_key'][0]}|{s['src_key'][1]}")
             dups.append({"sid": "S" + blind, "blind_patient": blind, "src_key": s["src_key"],
                          "members": s["members"], "dup_of": s["sid"]})
-            taken += len(s["members"])
+            taken += n
+            used += n
     return seqs, dups
 
 
@@ -361,7 +450,7 @@ def main():
         r["_time_cols"] = time_cols
         rows.append(r)
 
-    store = select_cases(rows, rng)
+    store, pat_counts = select_cases(rows, rng)
     if not store:
         raise SystemExit("선정된 영상 없음 — patient_id 접두어(24_/26_)와 RB 컬럼 확인")
     seqs, dups = build_sequences(store, rng)
@@ -380,14 +469,20 @@ def main():
         if r["_year"] and r["_grade"] is not None:
             pool[(r["_year"], r["_grade"])] += 1
 
+    n_dup = sum(r["duplicate_flag"] for r in admin)
+    n_unique = len(store)
     summary = {
         "labels": str(LABELS_CSV),
         "target_full_enumeration": TARGET_FULL_ENUMERATION,
         "n_original_rows": len(labels),
-        "n_selected_unique_images": len(store),
+        "n_selected_unique_images": n_unique,
         "n_reading_rows_including_duplicates": len(reading),
-        "n_hidden_duplicate_images": sum(r["duplicate_flag"] for r in admin),
+        "n_hidden_duplicate_images": n_dup,
+        # 비율 기준 = 원본 판독 대상(중복 제외). quota 와 같은 분모다.
+        "duplicate_frac_target": DUPLICATE_FRAC,
+        "duplicate_frac_actual": round(n_dup / max(n_unique, 1), 4),
         "n_sequences": len(seqs) + len(dups),
+        "patients_per_group": pat_counts,
         "time_columns_used": time_cols,
         "groups": {f: count(f) for f in (
             "target_2024_rb_upper", "control_2024_rb_lower",
@@ -431,7 +526,17 @@ def report(summary, admin):
 
     dup = summary["n_hidden_duplicate_images"]
     tot = summary["n_reading_rows_including_duplicates"]
-    print(f"    {'hidden duplicate':<26}{dup:>7}{'':>7}{dup / max(tot, 1) * 100:>8.1f}%")
+    uniq = summary["n_selected_unique_images"]
+    # 비율 분모는 원본 판독 대상(중복 제외). quota 와 같은 기준이다.
+    print(f"    {'hidden duplicate':<26}{dup:>7}{'':>7}"
+          f"{summary['duplicate_frac_actual'] * 100:>8.1f}%")
+    print(f"      목표 {summary['duplicate_frac_target'] * 100:.0f}% "
+          f"(원본 {uniq}장 기준, 초과 금지) → 실제 {dup}장")
+
+    pc = summary["patients_per_group"]
+    print(f"\n  [대조군 환자 층화]  상한 {pc['control_cap']}명 (= 표적군 환자 수)")
+    print(f"    표적군 {pc['target']}명 · 연도대조 {pc['year_ctl']}명 · "
+          f"하위대조 {pc['lower_ctl']}명 · 원거리대조 {pc['distant_ctl']}명")
 
     print("\n  [§3.4 mini-sequence]")
     lens = Counter(int(a["minisequence_len"]) for a in admin)
