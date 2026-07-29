@@ -31,6 +31,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.ndimage import label as cc_label
+from scipy.stats import rankdata
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # Experiment (core)
 import core as B                            # noqa: E402  로더·split·경로
@@ -218,30 +219,64 @@ def auc(pos, neg):
     return max(a, 1 - a)
 
 
-def export_l2(fe):
-    """3→4 경계 최고 AUC per (year, roi) — 16특징 중 최고 → l2_auc.csv (md 표2 대조)."""
+def _auc_dir(pos, neg):
+    """방향무관 AUC (tie-correct rankdata, NaN 제거). 순열 루프용."""
+    pos = pos[~np.isnan(pos)]; neg = neg[~np.isnan(neg)]
+    if len(pos) < 5 or len(neg) < 5:
+        return np.nan
+    r = rankdata(np.concatenate([pos, neg]))
+    U = r[:len(pos)].sum() - len(pos) * (len(pos) + 1) / 2
+    a = U / (len(pos) * len(neg))
+    return max(a, 1 - a)
+
+
+def perm_maxauc(sub, roi, feats, n_perm=1500, seed=0):
+    """3→4 경계 16-특징 max AUC 의 귀무 max 순열 p값 (§4.3 표2).
+    라벨(3/4)을 n_perm 회 섞어 매번 16-특징 max AUC 를 재계산 → 귀무 max 분포.
+    최댓값 선택 편향(16개 중 최고 선택)을 이 분포로 보정한다.
+    반환: (관측 max AUC, 구동 특징, perm p = P(귀무 max ≥ 관측 max))."""
+    cols = [f"{roi}_{k}" for k in feats if f"{roi}_{k}" in sub.columns]
+    P = sub.loc[sub[roi] == 4, cols].to_numpy(float)
+    N = sub.loc[sub[roi] == 3, cols].to_numpy(float)
+    if len(P) < 5 or len(N) < 5:
+        return np.nan, "", np.nan
+    obs = np.array([_auc_dir(P[:, j], N[:, j]) for j in range(len(cols))])
+    if np.all(np.isnan(obs)):
+        return np.nan, "", np.nan
+    obs_max = float(np.nanmax(obs)); best = cols[int(np.nanargmax(obs))].split(f"{roi}_")[-1]
+    X = np.vstack([P, N]); n4 = len(P); rng = np.random.default_rng(seed)
+    ge = 0
+    for _ in range(n_perm):
+        idx = rng.permutation(len(X))
+        pp, nn = X[idx[:n4]], X[idx[n4:]]
+        nm = np.nanmax([_auc_dir(pp[:, j], nn[:, j]) for j in range(X.shape[1])])
+        if nm >= obs_max:
+            ge += 1
+    return obs_max, best, (ge + 1) / (n_perm + 1)
+
+
+def export_l2(fe, n_perm=1500):
+    """3→4 경계 16-특징 max AUC + 귀무 max 순열 perm p per (year, roi) → l2_auc.csv.
+    Bonferroni(4-ROI) 임계 α=0.0125."""
     rows = []
     for yr in (2024, 2026):
         sub = fe[fe.year == yr]
         for roi in ROI:
-            pos, neg = sub[sub[roi] == 4], sub[sub[roi] == 3]
-            best_a, best_f = np.nan, ""
-            for k in FEATS:
-                col = f"{roi}_{k}"
-                if col not in sub:
-                    continue
-                a = auc(pos[col].values, neg[col].values)
-                if not np.isnan(a) and (np.isnan(best_a) or a > best_a):
-                    best_a, best_f = a, k
+            a, feat, pp = perm_maxauc(sub, roi, FEATS, n_perm=n_perm)
             rows.append(dict(year=yr, roi=roi, boundary="3to4",
-                             auc=round(best_a, 4) if not np.isnan(best_a) else "",
-                             feature=best_f, ref=REF_L2[yr][roi]))
+                             auc=round(a, 4) if a == a else "",
+                             feature=feat, perm_p=round(pp, 4) if pp == pp else "",
+                             bonferroni_0p0125=(int(pp < 0.0125) if pp == pp else ""),
+                             ref=REF_L2[yr][roi]))
     with open(RESULT_L / "l2_auc.csv", "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=["year", "roi", "boundary", "auc", "feature", "ref"])
+        w = csv.DictWriter(f, fieldnames=["year", "roi", "boundary", "auc", "feature",
+                                          "perm_p", "bonferroni_0p0125", "ref"])
         w.writeheader(); w.writerows(rows)
     print(f"[save] {RESULT_L / 'l2_auc.csv'}")
     for r in rows:
-        print(f"  {r['year']} {r['roi']:<3} 3→4 AUC {r['auc']} ({r['feature']})  ref {r['ref']}")
+        bf = "통과" if r["bonferroni_0p0125"] == 1 else ("미통과" if r["bonferroni_0p0125"] == 0 else "-")
+        print(f"  {r['year']} {r['roi']:<3} 3→4 AUC {r['auc']} ({r['feature']})  "
+              f"perm p {r['perm_p']} [{bf}]  ref {r['ref']}")
 
 
 def main():
@@ -249,11 +284,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild", action="store_true", help="features 재계산(기본: 있으면 재사용)")
     ap.add_argument("--ng", type=int, default=NG, help="텍스처 그레이 레벨 수")
+    ap.add_argument("--nperm", type=int, default=1500, help="귀무 max 순열 반복 수")
     args = ap.parse_args()
     NG = args.ng
     fpath = RESULT_L / "l2_features.csv"
     fe = pd.read_csv(fpath) if (fpath.exists() and not args.rebuild) else build()
-    export_l2(fe)
+    export_l2(fe, n_perm=args.nperm)
 
 
 if __name__ == "__main__":
