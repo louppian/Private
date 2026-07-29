@@ -1,28 +1,4 @@
-# -*- coding: utf-8 -*-
-r"""
-L2 — 라벨-영상 정합 (draft §4.3 / 부록 A) → Result/L/{l2_features.csv, l2_auc.csv}
 
-각 ROI 픽셀 분포에서 **16-특징 배터리**를 뽑아 인접 등급을 영상만으로 가르는 능력을
-방향무관 AUC(Mann-Whitney max(a,1−a))로 측정한다(모델 배제 = 학습 불필요).
-사전정렬 images_normalize + masks 를 uid 로 읽는다(core 로더).
-
-16-특징 (draft §4.3):
-  1차(4)   : 평균 mean · 중앙값 median · 균일도 uniformity(Σp²) · 엔트로피 entropy
-  GLRLM(6) : SRE LRE GLN RLN HGLRE LRHGLE       (Gray Level Run Length Matrix)
-  GLSZM(6) : SAE LZE GLN SZN ZP HGLZE           (Gray Level Size Zone Matrix)
-텍스처는 pyradiomics 없이 직접 구현(IBSI 정의). 그레이 Ng=16, ROI [min,max] 양자화,
-GLRLM 4방향 합산, GLSZM 8-연결. 영역 [RT,LT,RB,LB].
-
-산출:
-  l2_features.csv : 이미지×ROI×16특징
-  l2_auc.csv      : 3→4 경계 최고 AUC per (year, roi)  ← check_value_l 대조 (md 표2)
-
-⚠ AUC 절대값은 양자화(Ng·binning) 규약에 따라 md 와 소폭 다를 수 있으나, 특징 정의·경계·
-   방향무관 AUC 절차는 draft 와 동일하다.
-
-실행: python Experiment/L/l2_label_image.py [--rebuild] [--ng 16]
-"""
-import argparse
 import csv
 import os
 import sys
@@ -30,266 +6,451 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.ndimage import label as cc_label
+from scipy.ndimage import label as connected_components
 from scipy.stats import rankdata
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # Experiment (core)
-import core as B                            # noqa: E402  로더·split·경로
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import core as B  # noqa: E402
+
 
 REPO = Path(B._REPO)
 ROI = ["RT", "LT", "RB", "LB"]
 RESULT_L = REPO / "Result" / "L"
-NG = 16                                     # 텍스처 그레이 레벨 수
+FEATURES_PATH = RESULT_L / "l2_features.csv"
+AUC_PATH = RESULT_L / "l2_auc.csv"
 
-GLRLM_F = ["glrlm_SRE", "glrlm_LRE", "glrlm_GLN", "glrlm_RLN", "glrlm_HGLRE", "glrlm_LRHGLE"]
-GLSZM_F = ["glszm_SAE", "glszm_LZE", "glszm_GLN", "glszm_SZN", "glszm_ZP", "glszm_HGLZE"]
-FEATS = ["mean", "median", "uniformity", "entropy"] + GLRLM_F + GLSZM_F   # 16
+# CLI 대신 아래 상수를 직접 수정한다.
+REBUILD = True
+N_PERM = 1500
+SEED = 0
+BIN_WIDTH = 25.0
 
-REF_L2 = {2024: {"RT": 0.657, "RB": 0.631, "LT": 0.926, "LB": 0.831},   # md 표2 (3→4 최고)
-          2026: {"RT": 0.876, "RB": 0.837, "LT": 0.930, "LB": 0.843}}
+# B._load_img가 0~255 영상을 반환하면 1.0을 유지한다.
+# 실제 입력이 0~1로 저장된 영상이라면 255.0으로 바꾼다.
+INTENSITY_SCALE = 1.0
+
+# PyRadiomics는 단일 voxel ROI를 허용하지 않는다.
+MIN_ROI_PIXELS = 2
+
+EXTRACTOR_TAG = "numpy-pyradiomics-like-2d-six-v2"
+FEATS = [
+    "mean",
+    "median",
+    "entropy",
+    "uniformity",
+    "glrlm_SRE",
+    "glszm_SAE",
+]
+
+# distance=1인 2D GLRLM 방향. 방향 반대는 같은 run을 중복하므로 한쪽만 사용한다.
+GLRLM_DIRECTIONS = (
+    (0, 1),   # 0°: horizontal
+    (1, 0),   # 90°: vertical
+    (1, 1),   # 45° diagonal
+    (1, -1),  # 135° diagonal
+)
+
+GLSZM_STRUCTURE_8 = np.ones((3, 3), dtype=np.uint8)
 
 
 def _year(pid):
     return {"24": 2024, "26": 2026}.get(str(pid)[:2])
 
 
-# ─────────────────────────── 1차 특징(4) ───────────────────────────
-def first_order(v):
-    if len(v) < 20:
-        return {k: np.nan for k in ["mean", "median", "uniformity", "entropy"]}
-    hist, _ = np.histogram(v, bins=32, range=(0, 1))
-    p = hist / max(hist.sum(), 1)
-    nz = p[p > 0]
-    return dict(mean=float(v.mean()), median=float(np.median(v)),
-                uniformity=float((p ** 2).sum()), entropy=float(-(nz * np.log2(nz)).sum()))
+def _prepare_intensity(img):
+    """원본 intensity 단위를 유지하고 float64로 변환한다."""
+    arr = np.asarray(img, dtype=np.float64) * INTENSITY_SCALE
+    if arr.ndim != 2:
+        raise ValueError(f"2D image required, got shape={arr.shape}")
+    return arr
 
 
-# ─────────── 양자화 (ROI [min,max] → 0..Ng-1, 밖은 -1) ───────────
-def quantize(img, roi_mask, ng):
-    q = np.full(img.shape, -1, dtype=np.int32)
-    v = img[roi_mask]
-    if v.size == 0:
-        return q
-    lo, hi = float(v.min()), float(v.max())
-    if hi <= lo:
-        q[roi_mask] = 0
-        return q
-    lvl = np.clip(((img - lo) / (hi - lo) * ng).astype(np.int32), 0, ng - 1)
-    q[roi_mask] = lvl[roi_mask]
-    return q
+def _pyradiomics_bin_edges(values, bin_width=BIN_WIDTH):
+    """
+    PyRadiomics fixed-bin-width getBinEdges 규칙을 재현한다.
+
+    lowBound = minimum - (minimum % binWidth)
+    highBound = maximum + 2 * binWidth
+    edges = arange(lowBound, highBound, binWidth)
+    """
+    values = np.asarray(values, dtype=np.float64)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        raise ValueError("ROI contains no finite intensity")
+    if not np.isfinite(bin_width) or bin_width <= 0:
+        raise ValueError(f"bin_width must be positive, got {bin_width}")
+
+    minimum = float(np.min(values))
+    maximum = float(np.max(values))
+    low_bound = minimum - (minimum % bin_width)
+    high_bound = maximum + 2.0 * bin_width
+    edges = np.arange(low_bound, high_bound, bin_width, dtype=np.float64)
+
+    # PyRadiomics의 flat-region 방어 로직과 동일한 의미다.
+    if edges.size == 1:
+        edges = np.asarray([edges[0] - 0.5, edges[0] + 0.5], dtype=np.float64)
+    return edges
 
 
-def _crop(q):
-    ys, xs = np.where(q >= 0)
-    if ys.size == 0:
-        return None
-    return q[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+def discretize_pyradiomics(img, roi_mask, bin_width=BIN_WIDTH):
+    """
+    ROI 내부만 PyRadiomics fixed-bin-width 규칙으로 1-based gray level로 변환한다.
+    ROI 외부 및 non-finite voxel은 -1이다.
+    """
+    image = np.asarray(img, dtype=np.float64)
+    mask = np.asarray(roi_mask, dtype=bool)
+    if image.shape != mask.shape:
+        raise ValueError(f"image/mask shape mismatch: {image.shape} vs {mask.shape}")
+
+    valid_mask = mask & np.isfinite(image)
+    quantized = np.full(image.shape, -1, dtype=np.int32)
+    values = image[valid_mask]
+    if values.size == 0:
+        return quantized, valid_mask
+
+    edges = _pyradiomics_bin_edges(values, bin_width=bin_width)
+    quantized[valid_mask] = np.digitize(values, edges).astype(np.int32)
+    return quantized, valid_mask
 
 
-# ─────────────────────────── GLRLM (4방향 합산) ───────────────────────────
-def _rle(line, P):
-    n = len(line); i = 0
-    while i < n:
-        if line[i] < 0:
-            i += 1; continue
-        j = i
-        while j + 1 < n and line[j + 1] == line[i]:
-            j += 1
-        key = (int(line[i]), j - i + 1)
-        P[key] = P.get(key, 0) + 1
-        i = j + 1
+def first_order_features(img, valid_mask, quantized):
+    """PyRadiomics 방식의 Mean, Median, Entropy, Uniformity를 계산한다."""
+    values = np.asarray(img, dtype=np.float64)[valid_mask]
+    if values.size == 0:
+        return {
+            "mean": np.nan,
+            "median": np.nan,
+            "entropy": np.nan,
+            "uniformity": np.nan,
+        }
+
+    levels = quantized[valid_mask]
+    _, counts = np.unique(levels, return_counts=True)
+    probabilities = counts.astype(np.float64) / float(counts.sum())
+    eps = np.spacing(1.0)
+
+    return {
+        "mean": float(np.mean(values)),
+        "median": float(np.median(values)),
+        "entropy": float(-np.sum(probabilities * np.log2(probabilities + eps))),
+        "uniformity": float(np.sum(probabilities ** 2)),
+    }
 
 
-def glrlm_mat(q):
-    P = {}
-    H, W = q.shape
-    for r in range(H):
-        _rle(q[r, :], P)
-    for c in range(W):
-        _rle(q[:, c], P)
-    for off in range(-H + 1, W):
-        _rle(np.diagonal(q, offset=off), P)
-    qf = q[:, ::-1]
-    for off in range(-H + 1, W):
-        _rle(np.diagonal(qf, offset=off), P)
-    return P
+def _glrlm_sre_one_direction(quantized, valid_mask, direction):
+    """한 방향의 GLRLM을 암묵적으로 세어 Short Run Emphasis를 계산한다."""
+    height, width = quantized.shape
+    dr, dc = direction
+    run_length_counts = {}
 
+    rows, cols = np.nonzero(valid_mask)
+    for row, col in zip(rows.tolist(), cols.tolist()):
+        gray = int(quantized[row, col])
 
-def glrlm_feats(P):
-    Nr = sum(P.values())
-    if Nr == 0:
-        return {k: np.nan for k in GLRLM_F}
-    gi, ri = {}, {}
-    SRE = LRE = HGLRE = LRHGLE = 0.0
-    for (i, j), c in P.items():
-        SRE += c / j ** 2; LRE += c * j ** 2
-        HGLRE += c * (i + 1) ** 2; LRHGLE += c * (i + 1) ** 2 * j ** 2
-        gi[i] = gi.get(i, 0) + c; ri[j] = ri.get(j, 0) + c
-    GLN = sum(x ** 2 for x in gi.values()); RLN = sum(x ** 2 for x in ri.values())
-    return {"glrlm_SRE": SRE / Nr, "glrlm_LRE": LRE / Nr, "glrlm_GLN": GLN / Nr,
-            "glrlm_RLN": RLN / Nr, "glrlm_HGLRE": HGLRE / Nr, "glrlm_LRHGLE": LRHGLE / Nr}
-
-
-# ─────────────────────────── GLSZM (8-연결 존) ───────────────────────────
-_S8 = np.ones((3, 3), dtype=int)
-
-
-def glszm_mat(q, ng):
-    P = {}
-    for g in range(ng):
-        lab, n = cc_label(q == g, structure=_S8)
-        if n == 0:
+        # 같은 gray의 이전 voxel이 있으면 현재 voxel은 run 시작점이 아니다.
+        prev_row = row - dr
+        prev_col = col - dc
+        if (
+            0 <= prev_row < height
+            and 0 <= prev_col < width
+            and valid_mask[prev_row, prev_col]
+            and int(quantized[prev_row, prev_col]) == gray
+        ):
             continue
-        sizes = np.bincount(lab.ravel())[1:]          # zone 별 픽셀 수
-        for s in sizes:
-            key = (g, int(s))
-            P[key] = P.get(key, 0) + 1
-    return P
+
+        length = 1
+        next_row = row + dr
+        next_col = col + dc
+        while (
+            0 <= next_row < height
+            and 0 <= next_col < width
+            and valid_mask[next_row, next_col]
+            and int(quantized[next_row, next_col]) == gray
+        ):
+            length += 1
+            next_row += dr
+            next_col += dc
+
+        run_length_counts[length] = run_length_counts.get(length, 0) + 1
+
+    n_runs = int(sum(run_length_counts.values()))
+    if n_runs == 0:
+        return np.nan
+
+    numerator = sum(count / (length ** 2) for length, count in run_length_counts.items())
+    return float(numerator / n_runs)
 
 
-def glszm_feats(P, n_pix):
-    Nz = sum(P.values())
-    if Nz == 0:
-        return {k: np.nan for k in GLSZM_F}
-    gi, si = {}, {}
-    SAE = LZE = HGLZE = 0.0
-    for (i, s), c in P.items():
-        SAE += c / s ** 2; LZE += c * s ** 2; HGLZE += c * (i + 1) ** 2
-        gi[i] = gi.get(i, 0) + c; si[s] = si.get(s, 0) + c
-    GLN = sum(x ** 2 for x in gi.values()); SZN = sum(x ** 2 for x in si.values())
-    return {"glszm_SAE": SAE / Nz, "glszm_LZE": LZE / Nz, "glszm_GLN": GLN / Nz,
-            "glszm_SZN": SZN / Nz, "glszm_ZP": Nz / max(n_pix, 1), "glszm_HGLZE": HGLZE / Nz}
+def glrlm_short_run_emphasis(quantized, valid_mask):
+    """
+    PyRadiomics 기본처럼 각 2D 방향에서 SRE를 따로 계산한 뒤 산술평균한다.
+    """
+    direction_values = [
+        _glrlm_sre_one_direction(quantized, valid_mask, direction)
+        for direction in GLRLM_DIRECTIONS
+    ]
+    direction_values = np.asarray(direction_values, dtype=np.float64)
+    if np.all(~np.isfinite(direction_values)):
+        return np.nan
+    return float(np.nanmean(direction_values))
+
+
+def glszm_small_area_emphasis(quantized, valid_mask):
+    """2D 8-connectivity GLSZM의 Small Area Emphasis를 계산한다."""
+    gray_levels = np.unique(quantized[valid_mask])
+    zone_sizes = []
+
+    for gray in gray_levels:
+        component_map, n_components = connected_components(
+            valid_mask & (quantized == gray),
+            structure=GLSZM_STRUCTURE_8,
+        )
+        if n_components == 0:
+            continue
+        sizes = np.bincount(component_map.ravel())[1:]
+        zone_sizes.extend(int(size) for size in sizes if size > 0)
+
+    n_zones = len(zone_sizes)
+    if n_zones == 0:
+        return np.nan
+
+    sizes_array = np.asarray(zone_sizes, dtype=np.float64)
+    return float(np.sum(1.0 / (sizes_array ** 2)) / n_zones)
 
 
 def roi_feats(img, roi_mask):
-    v = img[roi_mask]
-    out = first_order(v)
-    if len(v) < 20:
-        out.update({k: np.nan for k in GLRLM_F + GLSZM_F}); return out
-    qc = _crop(quantize(img, roi_mask, NG))
-    if qc is None:
-        out.update({k: np.nan for k in GLRLM_F + GLSZM_F}); return out
-    out.update(glrlm_feats(glrlm_mat(qc)))
-    out.update(glszm_feats(glszm_mat(qc, NG), n_pix=int(roi_mask.sum())))
+    """한 ROI에서 6개 특징을 계산한다."""
+    out = {name: np.nan for name in FEATS}
+    quantized, valid_mask = discretize_pyradiomics(img, roi_mask, BIN_WIDTH)
+
+    if int(np.count_nonzero(valid_mask)) < MIN_ROI_PIXELS:
+        return out
+
+    out.update(first_order_features(img, valid_mask, quantized))
+    out["glrlm_SRE"] = glrlm_short_run_emphasis(quantized, valid_mask)
+    out["glszm_SAE"] = glszm_small_area_emphasis(quantized, valid_mask)
     return out
 
 
 def roi_pixel_masks(mask_bin):
-    coords = B.split_lungs_to_four(mask_bin) or [(0, 0, .5, .5), (0, .5, .5, 1), (.5, 0, 1, .5), (.5, .5, 1, 1)]
-    H, W = mask_bin.shape
-    out = np.zeros((4, H, W), bool)
+    coords = B.split_lungs_to_four(mask_bin) or [
+        (0, 0, 0.5, 0.5),
+        (0, 0.5, 0.5, 1),
+        (0.5, 0, 1, 0.5),
+        (0.5, 0.5, 1, 1),
+    ]
+    height, width = mask_bin.shape
+    out = np.zeros((4, height, width), dtype=bool)
+
     for i, (y0, x0, y1, x1) in enumerate(coords):
-        yy0, yy1, xx0, xx1 = int(y0 * H), int(y1 * H), int(x0 * W), int(x1 * W)
+        yy0, yy1 = int(y0 * height), int(y1 * height)
+        xx0, xx1 = int(x0 * width), int(x1 * width)
         out[i, yy0:yy1, xx0:xx1] = mask_bin[yy0:yy1, xx0:xx1] > 0
     return out
 
 
 def build():
     df = pd.read_csv(B.CSV_PATH)
-    has_ip = "image_path" in df.columns
-    recs = []
-    for n, (_, r) in enumerate(df.iterrows(), 1):
-        uid = str(r[B.UID_COL]); yr = _year(r[B.PATIENT_COL])
-        img = np.asarray(B._load_img(uid, r["image_path"] if has_ip else None),
-                         dtype=np.float32) / 255.0
-        msk = B._load_mask_np(uid) > 0
-        rmasks = roi_pixel_masks(msk)
-        rec = dict(uid=uid, year=yr, patient=r[B.PATIENT_COL],
-                   RT=int(r.RT), LT=int(r.LT), RB=int(r.RB), LB=int(r.LB))
+    has_image_path = "image_path" in df.columns
+    records = []
+
+    for n, (_, row) in enumerate(df.iterrows(), 1):
+        uid = str(row[B.UID_COL])
+        year = _year(row[B.PATIENT_COL])
+
+        raw_img = B._load_img(uid, row["image_path"] if has_image_path else None)
+        img = _prepare_intensity(raw_img)
+        mask = np.asarray(B._load_mask_np(uid)) > 0
+        if img.shape != mask.shape:
+            raise ValueError(f"{uid}: image/mask shape mismatch: {img.shape} vs {mask.shape}")
+        roi_masks = roi_pixel_masks(mask)
+
+        record = {
+            "uid": uid,
+            "year": year,
+            "patient": row[B.PATIENT_COL],
+            "extractor": EXTRACTOR_TAG,
+            "bin_width": BIN_WIDTH,
+            "intensity_scale": INTENSITY_SCALE,
+            "RT": int(row.RT),
+            "LT": int(row.LT),
+            "RB": int(row.RB),
+            "LB": int(row.LB),
+        }
+
         for i, roi in enumerate(ROI):
-            for k, val in roi_feats(img, rmasks[i]).items():
-                rec[f"{roi}_{k}"] = val
-        recs.append(rec)
+            for feature_name, value in roi_feats(img, roi_masks[i]).items():
+                record[f"{roi}_{feature_name}"] = value
+
+        records.append(record)
         if n % 100 == 0:
             print(f"  {n} imgs", end="\r")
-    out = pd.DataFrame(recs)
+
+    output = pd.DataFrame(records)
     RESULT_L.mkdir(parents=True, exist_ok=True)
-    out.to_csv(RESULT_L / "l2_features.csv", index=False)
-    print(f"\n[save] {RESULT_L / 'l2_features.csv'}  {out.shape}")
-    return out
+    output.to_csv(FEATURES_PATH, index=False)
+    print(f"\n[save] {FEATURES_PATH}  {output.shape}")
+    return output
 
 
-def auc(pos, neg):
-    pos, neg = pos[~np.isnan(pos)], neg[~np.isnan(neg)]
+def _auc_directionless(pos, neg):
+    """Mann–Whitney U 기반 방향 무관 AUC: max(AUC, 1-AUC)."""
+    pos = np.asarray(pos, dtype=np.float64)
+    neg = np.asarray(neg, dtype=np.float64)
+    pos = pos[np.isfinite(pos)]
+    neg = neg[np.isfinite(neg)]
+
     if len(pos) < 5 or len(neg) < 5:
         return np.nan
-    allv = np.concatenate([pos, neg]); rk = pd.Series(allv).rank().values
-    U = rk[:len(pos)].sum() - len(pos) * (len(pos) + 1) / 2
-    a = U / (len(pos) * len(neg))
-    return max(a, 1 - a)
+
+    ranks = rankdata(np.concatenate([pos, neg]), method="average")
+    u_value = ranks[: len(pos)].sum() - len(pos) * (len(pos) + 1) / 2
+    auc_value = u_value / (len(pos) * len(neg))
+    return max(auc_value, 1.0 - auc_value)
 
 
-def _auc_dir(pos, neg):
-    """방향무관 AUC (tie-correct rankdata, NaN 제거). 순열 루프용."""
-    pos = pos[~np.isnan(pos)]; neg = neg[~np.isnan(neg)]
-    if len(pos) < 5 or len(neg) < 5:
-        return np.nan
-    r = rankdata(np.concatenate([pos, neg]))
-    U = r[:len(pos)].sum() - len(pos) * (len(pos) + 1) / 2
-    a = U / (len(pos) * len(neg))
-    return max(a, 1 - a)
+def perm_maxauc(sub, roi, features, n_perm=N_PERM, seed=SEED):
+    """3→4 경계에서 6개 특징의 최대 방향 무관 AUC와 순열 p값을 계산한다."""
+    columns = [f"{roi}_{name}" for name in features]
+    missing = [column for column in columns if column not in sub.columns]
+    if missing:
+        raise KeyError(f"missing feature columns: {missing}")
 
-
-def perm_maxauc(sub, roi, feats, n_perm=1500, seed=0):
-    """3→4 경계 16-특징 max AUC 의 귀무 max 순열 p값 (§4.3 표2).
-    라벨(3/4)을 n_perm 회 섞어 매번 16-특징 max AUC 를 재계산 → 귀무 max 분포.
-    최댓값 선택 편향(16개 중 최고 선택)을 이 분포로 보정한다.
-    반환: (관측 max AUC, 구동 특징, perm p = P(귀무 max ≥ 관측 max))."""
-    cols = [f"{roi}_{k}" for k in feats if f"{roi}_{k}" in sub.columns]
-    P = sub.loc[sub[roi] == 4, cols].to_numpy(float)
-    N = sub.loc[sub[roi] == 3, cols].to_numpy(float)
-    if len(P) < 5 or len(N) < 5:
+    positive = sub.loc[sub[roi] == 4, columns].to_numpy(float)
+    negative = sub.loc[sub[roi] == 3, columns].to_numpy(float)
+    if len(positive) < 5 or len(negative) < 5:
         return np.nan, "", np.nan
-    obs = np.array([_auc_dir(P[:, j], N[:, j]) for j in range(len(cols))])
-    if np.all(np.isnan(obs)):
+
+    observed = np.asarray(
+        [_auc_directionless(positive[:, j], negative[:, j]) for j in range(len(columns))]
+    )
+    if np.all(np.isnan(observed)):
         return np.nan, "", np.nan
-    obs_max = float(np.nanmax(obs)); best = cols[int(np.nanargmax(obs))].split(f"{roi}_")[-1]
-    X = np.vstack([P, N]); n4 = len(P); rng = np.random.default_rng(seed)
-    ge = 0
+
+    observed_max = float(np.nanmax(observed))
+    best_index = int(np.nanargmax(observed))
+    best_feature = features[best_index]
+
+    values = np.vstack([positive, negative])
+    n_positive = len(positive)
+    rng = np.random.default_rng(seed)
+    exceed_count = 0
+    valid_permutations = 0
+
     for _ in range(n_perm):
-        idx = rng.permutation(len(X))
-        pp, nn = X[idx[:n4]], X[idx[n4:]]
-        nm = np.nanmax([_auc_dir(pp[:, j], nn[:, j]) for j in range(X.shape[1])])
-        if nm >= obs_max:
-            ge += 1
-    return obs_max, best, (ge + 1) / (n_perm + 1)
+        index = rng.permutation(len(values))
+        perm_positive = values[index[:n_positive]]
+        perm_negative = values[index[n_positive:]]
+        perm_auc = np.asarray(
+            [
+                _auc_directionless(perm_positive[:, j], perm_negative[:, j])
+                for j in range(values.shape[1])
+            ]
+        )
+        if np.all(np.isnan(perm_auc)):
+            continue
+        valid_permutations += 1
+        if float(np.nanmax(perm_auc)) >= observed_max:
+            exceed_count += 1
+
+    if valid_permutations == 0:
+        return observed_max, best_feature, np.nan
+
+    p_value = (exceed_count + 1) / (valid_permutations + 1)
+    return observed_max, best_feature, p_value
 
 
-def export_l2(fe, n_perm=1500):
-    """3→4 경계 16-특징 max AUC + 귀무 max 순열 perm p per (year, roi) → l2_auc.csv.
-    Bonferroni(4-ROI) 임계 α=0.0125."""
+def export_l2(features_df, n_perm=N_PERM):
+    """연도×ROI별 3→4 최대 AUC와 6-feature 순열 p값을 저장한다."""
     rows = []
-    for yr in (2024, 2026):
-        sub = fe[fe.year == yr]
+    for year in (2024, 2026):
+        subset = features_df[features_df.year == year]
         for roi in ROI:
-            a, feat, pp = perm_maxauc(sub, roi, FEATS, n_perm=n_perm)
-            rows.append(dict(year=yr, roi=roi, boundary="3to4",
-                             auc=round(a, 4) if a == a else "",
-                             feature=feat, perm_p=round(pp, 4) if pp == pp else "",
-                             bonferroni_0p0125=(int(pp < 0.0125) if pp == pp else ""),
-                             ref=REF_L2[yr][roi]))
-    with open(RESULT_L / "l2_auc.csv", "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=["year", "roi", "boundary", "auc", "feature",
-                                          "perm_p", "bonferroni_0p0125", "ref"])
-        w.writeheader(); w.writerows(rows)
-    print(f"[save] {RESULT_L / 'l2_auc.csv'}")
-    for r in rows:
-        bf = "통과" if r["bonferroni_0p0125"] == 1 else ("미통과" if r["bonferroni_0p0125"] == 0 else "-")
-        print(f"  {r['year']} {r['roi']:<3} 3→4 AUC {r['auc']} ({r['feature']})  "
-              f"perm p {r['perm_p']} [{bf}]  ref {r['ref']}")
+            auc_value, feature_name, p_value = perm_maxauc(
+                subset,
+                roi,
+                FEATS,
+                n_perm=n_perm,
+                seed=SEED,
+            )
+            rows.append(
+                {
+                    "year": year,
+                    "roi": roi,
+                    "boundary": "3to4",
+                    "auc": round(auc_value, 4) if np.isfinite(auc_value) else "",
+                    "feature": feature_name,
+                    "perm_p": round(p_value, 4) if np.isfinite(p_value) else "",
+                    "bonferroni_0p0125": (
+                        int(p_value < 0.0125) if np.isfinite(p_value) else ""
+                    ),
+                    "extractor": EXTRACTOR_TAG,
+                }
+            )
+
+    RESULT_L.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "year",
+        "roi",
+        "boundary",
+        "auc",
+        "feature",
+        "perm_p",
+        "bonferroni_0p0125",
+        "extractor",
+    ]
+    with AUC_PATH.open("w", newline="", encoding="utf-8-sig") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"[save] {AUC_PATH}")
+    for row in rows:
+        passed = row["bonferroni_0p0125"]
+        status = "통과" if passed == 1 else ("미통과" if passed == 0 else "-")
+        print(
+            f"  {row['year']} {row['roi']:<3} 3→4 "
+            f"AUC {row['auc']} ({row['feature']})  "
+            f"perm p {row['perm_p']} [{status}]"
+        )
+
+
+def _cache_is_compatible(features_df):
+    required = {
+        "uid",
+        "year",
+        "patient",
+        "extractor",
+        "bin_width",
+        "intensity_scale",
+        *ROI,
+        *(f"{roi}_{feature}" for roi in ROI for feature in FEATS),
+    }
+    if not required.issubset(features_df.columns):
+        return False
+
+    tags = features_df["extractor"].dropna().astype(str).unique()
+    if len(tags) != 1 or tags[0] != EXTRACTOR_TAG:
+        return False
+
+    bin_widths = pd.to_numeric(features_df["bin_width"], errors="coerce").dropna().unique()
+    scales = pd.to_numeric(features_df["intensity_scale"], errors="coerce").dropna().unique()
+    return (
+        len(bin_widths) == 1
+        and np.isclose(bin_widths[0], BIN_WIDTH)
+        and len(scales) == 1
+        and np.isclose(scales[0], INTENSITY_SCALE)
+    )
 
 
 def main():
-    global NG
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--rebuild", action="store_true", help="features 재계산(기본: 있으면 재사용)")
-    ap.add_argument("--ng", type=int, default=NG, help="텍스처 그레이 레벨 수")
-    ap.add_argument("--nperm", type=int, default=1500, help="귀무 max 순열 반복 수")
-    args = ap.parse_args()
-    NG = args.ng
-    fpath = RESULT_L / "l2_features.csv"
-    fe = pd.read_csv(fpath) if (fpath.exists() and not args.rebuild) else build()
-    export_l2(fe, n_perm=args.nperm)
+    if FEATURES_PATH.exists() and not REBUILD:
+        cached = pd.read_csv(FEATURES_PATH)
+        features_df = cached if _cache_is_compatible(cached) else build()
+    else:
+        features_df = build()
+
+    export_l2(features_df, n_perm=N_PERM)
 
 
 if __name__ == "__main__":
