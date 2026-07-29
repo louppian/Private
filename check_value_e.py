@@ -2,11 +2,11 @@
 r"""
 check_value_e.py — E 실험 산출값이 draft md(§5) 기준과 일치하는지 검증.
 
-  E1 cross (§4.4)      : fwd −0.231 / rev +0.004         ← checkpoint/E1/dorga npz
-  E2 raw Δg (부록 B)    : 기준표 없음, reject_A1 플래그만 정보출력  ← e2_summary.json
-  E3 정합 Δγ (§5.2)     : 전 ROI CI 0 포함(A1 미기각), RB Δγ≈−0.102  ← e3_summary.json
-  E4 복원곡선 (§5.1)    : slope≈0.898, intercept≈0.04     ← e4_summary.json
-  E5 누출 (§5.3)        : frac 1.0→+0.045, 0.5→+0.061, 0.25→−0.203  ← e5_summary.json
+  E1 cross (§4.4)       : fwd −0.224 / rev +0.120         ← checkpoint/E1/dorga npz
+  E2 정합 Δγ (§5.2)      : 전 ROI CI 0 포함(A1 미기각), RB Δγ≈−0.139  ← E2/e2_summary.json
+  E3 복원곡선 (§5.1)     : slope≈0.940, intercept≈0.011    ← E3/e3_summary.json
+  E4 누출 (§5.3)        : frac 1.0→+0.015, 0.5→+0.035, 0.25→−0.009  ← E4/e4_summary.json
+  부록B raw Δg          : 기준표 없음, 정보출력만          ← AppendixB/appb_summary.json
 
 실행: python check_value_e.py [--tol 0.05]
 """
@@ -24,10 +24,10 @@ RESULT = REPO / "Result"                        # summary json (git 추적)
 ROI = ["RT", "LT", "RB", "LB"]
 RUNS = CKPT / "E1" / "dorga"                     # E1 npz
 
-REF_BIAS = {"fwd": -0.231, "rev": +0.004}                       # §4.4 표3 (E1)
-REF_E2_DG = {"RB": -0.102}                                      # §5.2/5.3 검산값
-REF_E3 = {"slope": 0.898, "intercept": 0.04}                   # §5.1 복원곡선
-REF_E4 = {1.0: +0.045, 0.5: +0.061, 0.25: -0.203}              # §5.3 누출
+REF_BIAS = {"fwd": -0.224, "rev": +0.120}                       # §4.4 표3 (E1, 새 백본)
+REF_E2_DG = {"RB": -0.139}                                      # §5.2 matched RB Δγ
+REF_E3 = {"slope": 0.940, "intercept": 0.011}                  # §5.1 복원곡선 (E3 양성대조)
+REF_E4 = {1.0: +0.015, 0.5: +0.035, 0.25: -0.009}              # §5.3 누출 (E4 음성대조)
 
 
 def pooled_bias(mode):
@@ -59,7 +59,7 @@ def check_e1(rec, tol):
 
 
 def check_e2(rec, tol):
-    print("\n" + "=" * 76); print("[E2] raw in-domain Δg_raw (§5.2 raw)"); print("=" * 76)
+    print("\n" + "=" * 76); print("[부록B] raw in-domain Δg_raw (정합 전)"); print("=" * 76)
     e2 = _load("AppendixB/appb_summary.json")
     if not e2:
         print("  [SKIP] Result/AppendixB/appb_summary.json 없음 — appendixB_indomain_raw.py 실행 후"); return
@@ -71,7 +71,7 @@ def check_e2(rec, tol):
 
 
 def check_e3(rec, tol):
-    print("\n" + "=" * 76); print("[E3] 정합 in-domain Δγ_matched (§5.2)"); print("=" * 76)
+    print("\n" + "=" * 76); print("[E2] 정합 in-domain Δγ_matched (§5.2)"); print("=" * 76)
     e3 = _load("E2/e2_summary.json")
     if not e3:
         print("  [SKIP] Result/E2/e2_summary.json 없음 — e2_indomain_matched.py 실행 후"); return
@@ -92,7 +92,7 @@ def check_e3(rec, tol):
 
 
 def check_e4(rec, tol):
-    print("\n" + "=" * 76); print("[E4] 양성대조 복원곡선 (§5.1)"); print("=" * 76)
+    print("\n" + "=" * 76); print("[E3] 양성대조 복원곡선 (§5.1)"); print("=" * 76)
     e4 = _load("E3/e3_summary.json")
     if not e4:
         print("  [SKIP] Result/E3/e3_summary.json 없음 — e3_positive_control.py 실행 후"); return
@@ -107,7 +107,7 @@ def check_e4(rec, tol):
 
 
 def check_e5(rec, tol):
-    print("\n" + "=" * 76); print("[E5] 음성대조 누출 (§5.3)"); print("=" * 76)
+    print("\n" + "=" * 76); print("[E4] 음성대조 누출 (§5.3)"); print("=" * 76)
     e5 = _load("E4/e4_summary.json")
     if not e5:
         print("  [SKIP] Result/E4/e4_summary.json 없음 — e4_negative_control.py 실행 후"); return

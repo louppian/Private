@@ -2,11 +2,11 @@
 r"""
 check_value_a.py — A1 최종 판정값이 draft md(§5.3)와 일치하는지 검증.
 
-  δ_obs   (§4.4 표4)  : RB +0.198, LT +0.138           ← E1 npz 또는 verdict
-  Δγ 정합 (§5.2)      : RB −0.102                        ← A1_verdict.json
-  δ_corr  (§5.3 표)   : δ_obs + Δγ/2. RB +0.147[+0.029,+0.263](CI 0 배제),
-                         LT +0.064(CI 0 포함). CI 0 배제 ROI = RB 뿐.
-  최종 판정: A1 보정 후 유의 드리프트는 RB 상위경계 하나로 국소화.
+  δ_obs   (§4.4 표4)  : RB +0.240, LT +0.216           ← E1 npz 또는 verdict
+  Δγ 정합 (§5.2)      : RB −0.139                        ← A1_verdict.json (E2 matched)
+  δ_corr  (§5.3 표)   : δ_obs + Δγ/2. RB +0.171[+0.040,+0.296](CI 0 배제),
+                         LT +0.131(CI 0 포함). CI 0 배제 ROI = RB 뿐.
+  최종 판정: 방향 비대칭 보정 후 유의 신호는 RB 상위경계 하나로 국소화.
 
 산출물: Result/A1_verdict.json (Experiment/E/summary.py). 실행: python check_value_a.py
 """
@@ -23,8 +23,8 @@ CKPT = REPO / "checkpoint"
 ROI = ["RT", "LT", "RB", "LB"]
 RUNS = CKPT / "E1" / "dorga"
 
-REF_DOBS = {"RB": +0.198, "LT": +0.138}                        # §4.4 표4
-REF_DCORR = {"RB": +0.147, "LT": +0.064}                       # §5.3 표
+REF_DOBS = {"RB": +0.240, "LT": +0.216}                        # §4.4 표4 (새 백본)
+REF_DCORR = {"RB": +0.171, "LT": +0.131}                       # §5.3 표
 REF_EXCLUDE0 = {"RB"}                                          # δ_corr CI 0 배제 ROI
 
 
