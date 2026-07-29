@@ -140,6 +140,7 @@ def build_verdict(dobs_map=None):
     def _ld(p):
         return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
     matched = _ld(RESULT_MATCHED / "e2_summary.json")   # Δγ (Experiment 2, matched)
+    raw     = _ld(RESULT_APPB / "appb_summary.json")     # Δγ_raw (부록 B, 정합 전)
     pos     = _ld(RESULT_POS / "e3_summary.json")        # 복원곡선 (Experiment 3, 양성대조)
     neg     = _ld(RESULT_NEG / "e4_summary.json")        # 누출 (Experiment 4, 음성대조)
 
@@ -173,6 +174,18 @@ def build_verdict(dobs_map=None):
                     row["ci"] = _reci(corr_boot, row["delta_corr"])
             except (KeyError, TypeError, ValueError):
                 pass
+        if raw and "raw" in raw:                         # 부록 B: 정합 전 δ_corr_raw = δ_obs + Δγ_raw/2
+            try:
+                ar = np.array(raw["raw"]["2024"][key]["vec"], dtype=float)
+                br = np.array(raw["raw"]["2026"][key]["vec"], dtype=float)
+                dgr = float(ar.mean() - br.mean())
+                row["delta_g_raw"] = dgr
+                row["delta_corr_raw"] = dobs + dgr / 2
+                if dboot is not None:
+                    corr_boot_r = dboot + (_boot_mean(ar, seed=5) - _boot_mean(br, seed=6)) / 2
+                    row["ci_raw"] = _reci(corr_boot_r, row["delta_corr_raw"])
+            except (KeyError, TypeError, ValueError):
+                pass
         dc[key] = row
 
     V = {"delta_corrected": dc,
@@ -199,6 +212,16 @@ def build_verdict(dobs_map=None):
             print(f"  {key:<8}{row['delta_obs']:>+9.3f}{row['gamma']:>+9.3f}"
                   f"{row.get('delta_g_matched', float('nan')):>+9.3f}"
                   f"{(dcv if dcv is not None else float('nan')):>+9.3f}{ci_s:>22}{excl:>9}")
+        if any("delta_corr_raw" in dc[k] for k in dc):     # 부록 B: 정합 전 δ_corr_raw (대조)
+            print(f"\n  [부록 B] 정합 전 δ_corr_raw = δ_obs + Δγ_raw/2")
+            for key in keys:
+                row = dc.get(key, {})
+                if "delta_corr_raw" not in row:
+                    continue
+                cir = row.get("ci_raw")
+                cir_s = f"[{cir[0]:+.3f},{cir[1]:+.3f}]" if cir else "-"
+                print(f"    {key:<8}Δγ_raw {row['delta_g_raw']:>+.3f}  "
+                      f"δ_corr_raw {row['delta_corr_raw']:>+.3f}  {cir_s}")
         if pos and pos.get("recovery_slope") is not None:
             print(f"\n  [E3 양성대조] 복원 기울기 {pos['recovery_slope']:+.3f} (이상 1.0)")
         if neg and neg.get("curve"):
