@@ -74,7 +74,7 @@
 | 레벨 | 계산 | 산출 |
 |---|---|---|
 | **L1** 구조·분포 | 환자·영상수, 시퀀스길이, 평균등급, 등급 0~4 비율 (labels.csv) | `Result/L/l1_structure.csv` |
-| **L2** 라벨-영상 | ROI **16-특징**[1차 4(mean·median·uniformity·entropy) + GLRLM 6(SRE·LRE·GLN·RLN·HGLRE·LRHGLE) + GLSZM 6(SAE·LZE·GLN·SZN·ZP·HGLZE)]. 그레이 Ng=16, ROI [min,max] 양자화, GLRLM 4방향 합산, GLSZM 8-연결. 인접등급 방향무관 AUC=max(a,1−a). 경계 3→4 | `Result/L/{l2_features,l2_auc}.csv` |
+| **L2** 라벨-영상 | ROI **6-특징**[1차 4(mean·median·uniformity·entropy) + GLRLM SRE + GLSZM SAE]. 그레이 Ng=16, ROI [min,max] 양자화, GLRLM 4방향 합산, GLSZM 8-연결. 인접등급 방향무관 AUC=max(a,1−a). 경계 3→4, 귀무 max 순열 1,500회 보정 | `Result/L/{l2_features,l2_auc}.csv` |
 | **L3** 방향반전 분해 | E1 예측 → δ·γ (모델 의존) | (= E1) |
 | **L4** 재현성 | 재측정 2세션 → 자기일치 ACC, weighted κ(quadratic), Wilcoxon | `Result/L/l4_reproducibility.csv` |
 
