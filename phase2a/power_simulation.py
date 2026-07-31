@@ -44,13 +44,17 @@ REQUIRE_C_NOISE = True     # §6 "C_noise 가 양수" 를 진행 판정에 함�
 C_YEAR_GRID = (0.05, 0.10, 0.15, 0.20, 0.25)
 C_CUTPOINT_GRID = (0.05, 0.10, 0.15, 0.20)
 
-# ── 기저 이동률. 출처를 판독 전에 명시해야 한다(plan §4.4). ──
-# 아래 0.08 은 Phase 1 L4 자기일치(RB ACC 0.689 / weighted κ 0.899)에서 유도한 값이
-# 아니라 임시 자리값이다. 근거를 확정하기 전까지 단일 값이 아니라 격자 곡선으로 보고한다.
-P26_3UP = 0.08             # 2026 기존 3 → 재판독 4
-P26_4DOWN = 0.08           # 2026 기존 4 → 재판독 ≤3
-P24_4DOWN = 0.08           # 2024 기존 4 → 재판독 ≤3
-P24_3DOWN_LOWER = 0.08     # 2024 기존 3 → 재판독 ≤2
+# ── 기저 이동률 — 출처: Phase 1 L4 판독자 자기일치 (plan §4.4 요구) ──
+# Result/L/l4_reproducibility.csv 의 RB: 자기일치 ACC 0.6891 · MAE 0.3361.
+#   불일치율      = 1 − 0.6891 = 0.3109
+#   평균 이동 크기 = 0.3361 / 0.3109 = 1.08  → 불일치는 거의 전부 인접 등급 이동
+#   방향 대칭 가정 → 한 방향 기저 이동률 = 0.3109 / 2 = 0.1555
+# 이 값은 판독 기준 차이가 없어도 발생하는 반복 판독 변동의 바닥이다.
+BASE_MOVE = 0.155
+P26_3UP = BASE_MOVE        # 2026 기존 3 → 재판독 4
+P26_4DOWN = BASE_MOVE      # 2026 기존 4 → 재판독 ≤3
+P24_4DOWN = BASE_MOVE      # 2024 기존 4 → 재판독 ≤3
+P24_3DOWN_LOWER = BASE_MOVE  # 2024 기존 3 → 재판독 ≤2
 
 PATIENT_SIGMA = 0.35       # 환자 내 상관: 로짓 척도 환자 랜덤효과 SD
 NON_EVALUABLE = 0.02       # 판독 불가 비율
@@ -275,12 +279,15 @@ def main():
         "n_patients": len(pats),
         "n_duplicate_pairs": len(pairs),
         "success_rule": f"one-sided lower{int((1 - ALPHA) * 100)} > {NULL_MARGIN} for " + ", ".join(keys),
-        "rate_source_note": "기저 이동률은 임시 자리값이다. plan §4.4 대로 판독 전에 출처를 확정한다.",
+        "base_move_rate": BASE_MOVE,
+        "rate_source_note": ("기저 이동률 0.155 = Phase 1 L4 RB 자기일치에서 유도 "
+                             "(ACC 0.6891 → 불일치 0.3109, MAE 0.3361 로 인접 이동 확인, "
+                             "방향 대칭 가정하여 절반). plan §4.4 의 출처 명시 요구를 충족한다."),
         "rows": out_rows,
     }, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"\n  clip=X 는 이동률이 [0, 0.95] 로 잘려 목표 C 를 달성 못한 시나리오다.")
-    print(f"  기저 이동률은 임시 자리값 — plan §4.4 대로 판독 전에 출처를 확정한다.")
+    print(f"  기저 이동률 {BASE_MOVE} = Phase 1 L4 RB 자기일치(ACC 0.6891)에서 유도.")
     print("\n" + "=" * W)
     print(f"[save] {OUT_DIR}")
     for n in ("p2a_power_grid.csv", "p2a_power_summary.json"):
