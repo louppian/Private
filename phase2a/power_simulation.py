@@ -52,11 +52,12 @@ REQUIRE_C_NOISE = False
 C_YEAR_GRID = (0.15, 0.20, 0.25)
 C_CUTPOINT_GRID = (0.15, 0.20)
 
-# ── 환자 수 축 (v2 §4.4 "1차 성공 판정에 필요한 환자 수") ──
-# 코호트는 유한하다 — 2024 RB 3·4 보유 45명, 2026 33명이 상한이라 늘릴 수 없다.
-# 따라서 가용 환자의 일부만 판독하는 축소 방향으로 곡선을 그려, 목표 power 0.80 을
-# 넘기는 최소 환자 수를 찾는다. 1.0 이 전수다.
-PATIENT_FRACTIONS = (0.5, 0.7, 0.85, 1.0)
+# 판독 대상 환자 중 실제로 쓰는 비율. 이 스크립트는 전수(1.0)만 돌린다.
+# 환자 수를 줄여가며 필요 환자 수를 찾는 것은 power_patient_axis.py 가 한다.
+PATIENT_FRACTIONS = (1.0,)
+
+# 산출 파일 접두어. power_patient_axis.py 가 다른 값으로 덮어쓴다.
+OUT_PREFIX = "p2a_power"
 
 # ── 기저 이동률 — 출처: Phase 1 L4 판독자 자기일치 (plan §4.4 요구) ──
 # Result/L/l4_reproducibility.csv 의 RB: 자기일치 ACC 0.6891 · MAE 0.3361.
@@ -337,8 +338,8 @@ def main():
                                 for k in ("C_year", "C_cutpoint", "C_noise"))
                       + f"{'  X' if clipped else '   ':>6}")
 
-    write_csv(OUT_DIR / "p2a_power_grid.csv", out_rows)
-    (OUT_DIR / "p2a_power_summary.json").write_text(json.dumps({
+    write_csv(OUT_DIR / f"{OUT_PREFIX}_grid.csv", out_rows)
+    (OUT_DIR / f"{OUT_PREFIX}_summary.json").write_text(json.dumps({
         "admin_key": str(ADMIN_KEY),
         "n_images": len(base),
         "n_patients": len(pats),
@@ -367,9 +368,10 @@ def main():
     print(f"  기저 이동률 {BASE_MOVE} = Phase 1 L4 RB 자기일치(ACC 0.6891)에서 유도.")
     print("\n" + "=" * W)
     print(f"[save] {OUT_DIR}")
-    for n in ("p2a_power_grid.csv", "p2a_power_summary.json"):
+    for n in (f"{OUT_PREFIX}_grid.csv", f"{OUT_PREFIX}_summary.json"):
         print(f"  - {n}")
     print("=" * W)
+    return out_rows
 
 
 if __name__ == "__main__":
