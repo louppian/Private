@@ -49,8 +49,14 @@ D_ROI_MIN = 0.05           # 보조 C_ROI 최소 검출 효과크기 (판독 후
 REQUIRE_C_NOISE = False
 
 # ── 시나리오 격자 (참값) ──
-C_YEAR_GRID = (0.05, 0.10, 0.15, 0.20, 0.25)
-C_CUTPOINT_GRID = (0.05, 0.10, 0.15, 0.20)
+C_YEAR_GRID = (0.15, 0.20, 0.25)
+C_CUTPOINT_GRID = (0.15, 0.20)
+
+# ── 환자 수 축 (v2 §4.4 "1차 성공 판정에 필요한 환자 수") ──
+# 코호트는 유한하다 — 2024 RB 3·4 보유 45명, 2026 33명이 상한이라 늘릴 수 없다.
+# 따라서 가용 환자의 일부만 판독하는 축소 방향으로 곡선을 그려, 목표 power 0.80 을
+# 넘기는 최소 환자 수를 찾는다. 1.0 이 전수다.
+PATIENT_FRACTIONS = (0.5, 0.7, 0.85, 1.0)
 
 # ── 기저 이동률 — 출처: Phase 1 L4 판독자 자기일치 (plan §4.4 요구) ──
 # Result/L/l4_reproducibility.csv 의 RB: 자기일치 ACC 0.6891 · MAE 0.3361.
@@ -258,6 +264,10 @@ def main():
     strata = [np.array([pat_index[p] for p in pats if pat_year[p] == y], dtype=int)
               for y in ("2024", "2026")]
 
+    pat_nimg = np.zeros(len(pats))
+    for r in base:
+        pat_nimg[pat_index[r["patient_id"]]] += 1
+
     keys = ["C_year", "C_cutpoint"] + (["C_noise"] if REQUIRE_C_NOISE else [])
     dmin = {"C_year": D_MIN, "C_cutpoint": D_MIN, "C_noise": D_NOISE_MIN}
     W = 76
@@ -266,46 +276,66 @@ def main():
     print("=" * W)
     print(f"  영상 {len(base)}장 · 환자 {len(pats)}명 · 중복쌍 {len(pairs)}개 · "
           f"n_sim {N_SIM} · n_boot {N_BOOT}")
-    print(f"\n  {'C_year':>7}{'C_cut':>7}{'power':>8} | " + "".join(f"{'p:'+k:>15}" for k in keys)
+    print(f"\n  {'frac':>6}{'환자':>6}{'영상':>7}{'C_year':>8}{'C_cut':>7}{'power':>8} | "
+          + "".join(f"{'p:'+k:>15}" for k in keys)
           + " | " + "".join(f"{'평균 '+k:>15}" for k in ("C_year", "C_cutpoint", "C_noise"))
           + f"{'clip':>6}")
 
     out_rows = []
-    for c_year in C_YEAR_GRID:
-        for c_cut in C_CUTPOINT_GRID:
-            rates = scenario_rates(c_year, c_cut)
-            clipped = rates.pop("_clipped")
-            hit, acc, per = 0, defaultdict(list), defaultdict(int)
-            for _ in range(N_SIM):
-                reread = draw_reread(rows, rates, rng)
-                M = patient_stats(pat_index, groups, pairs, reread)
-                pt = contrasts_from(M.sum(axis=0))
-                for k, v in pt.items():
-                    if not np.isnan(v):
-                        acc[k].append(float(v))
-                lo = bootstrap_lower(M, strata, keys, rng)
-                # v2 §4.2 성공 조건 = CI 하한 > 0 **그리고** 점추정 ≥ d_min.
-                # 조건별 통과율을 따로 남긴다. 공동 검정력만 보면 병목을 알 수 없다.
-                ok = {k: (lo[k] > NULL_MARGIN and not np.isnan(pt[k]) and pt[k] >= dmin[k])
-                      for k in keys}
-                for k, v in ok.items():
-                    per[k] += int(v)
-                hit += int(all(ok.values()))
-            row = {"target_C_year": c_year, "target_C_cutpoint": c_cut,
-                   "power": hit / N_SIM,
-                   **{f"power_{k}": per[k] / N_SIM for k in keys},
-                   "mean_C_year": float(np.mean(acc["C_year"])) if acc["C_year"] else float("nan"),
-                   "mean_C_cutpoint": float(np.mean(acc["C_cutpoint"])) if acc["C_cutpoint"] else float("nan"),
-                   "mean_C_noise": float(np.mean(acc["C_noise"])) if acc["C_noise"] else float("nan"),
-                   "rates_clipped": clipped,
-                   **{k: rates[k] for k in sorted(rates)},
-                   "n_sim": N_SIM, "n_boot": N_BOOT, "patient_sigma": PATIENT_SIGMA}
-            out_rows.append(row)
-            print(f"  {c_year:>7.2f}{c_cut:>7.2f}{row['power']:>8.3f} | "
-                  + "".join(f"{row[f'power_{k}']:>15.3f}" for k in keys) + " | "
-                  + "".join(f"{row[f'mean_{k}']:>15.3f}"
-                            for k in ("C_year", "C_cutpoint", "C_noise"))
-                  + f"{'  X' if clipped else '   ':>6}")
+    for frac in PATIENT_FRACTIONS:
+        # 층별로 판독 대상 환자 수를 줄인다. 어느 환자가 뽑히는지는 복제마다 다시
+        # 뽑아, 특정 환자 조합에 기댄 검정력이 나오지 않게 한다.
+        take = [max(2, int(round(len(s) * frac))) for s in strata]
+        n_pat_used = sum(take)
+        for c_year in C_YEAR_GRID:
+            for c_cut in C_CUTPOINT_GRID:
+                rates = scenario_rates(c_year, c_cut)
+                clipped = rates.pop("_clipped")
+                hit, acc, per = 0, defaultdict(list), defaultdict(int)
+                n_img_acc = []
+                for _ in range(N_SIM):
+                    sub = [rng.choice(s, size=t, replace=False) for s, t in zip(strata, take)]
+                    sel = np.concatenate(sub)
+                    sub_strata = []
+                    off = 0
+                    for s in sub:
+                        sub_strata.append(np.arange(off, off + len(s)))
+                        off += len(s)
+                    n_img_acc.append(float(pat_nimg[sel].sum()))
+
+                    reread = draw_reread(rows, rates, rng)
+                    M = patient_stats(pat_index, groups, pairs, reread)[sel]
+                    pt = contrasts_from(M.sum(axis=0))
+                    for k, v in pt.items():
+                        if not np.isnan(v):
+                            acc[k].append(float(v))
+                    lo = bootstrap_lower(M, sub_strata, keys, rng)
+                    # v2 §4.2 성공 조건 = CI 하한 > 0 **그리고** 점추정 ≥ d_min.
+                    # 조건별 통과율을 따로 남긴다. 공동 power 만 보면 병목을 알 수 없다.
+                    ok = {k: (lo[k] > NULL_MARGIN and not np.isnan(pt[k]) and pt[k] >= dmin[k])
+                          for k in keys}
+                    for k, v in ok.items():
+                        per[k] += int(v)
+                    hit += int(all(ok.values()))
+                row = {"patient_frac": frac,
+                       "n_patients_used": n_pat_used,
+                       "n_images_used": round(float(np.mean(n_img_acc)), 1),
+                       "target_C_year": c_year, "target_C_cutpoint": c_cut,
+                       "power": hit / N_SIM,
+                       **{f"power_{k}": per[k] / N_SIM for k in keys},
+                       "mean_C_year": float(np.mean(acc["C_year"])) if acc["C_year"] else float("nan"),
+                       "mean_C_cutpoint": float(np.mean(acc["C_cutpoint"])) if acc["C_cutpoint"] else float("nan"),
+                       "mean_C_noise": float(np.mean(acc["C_noise"])) if acc["C_noise"] else float("nan"),
+                       "rates_clipped": clipped,
+                       **{k: rates[k] for k in sorted(rates)},
+                       "n_sim": N_SIM, "n_boot": N_BOOT, "patient_sigma": PATIENT_SIGMA}
+                out_rows.append(row)
+                print(f"  {frac:>6.2f}{n_pat_used:>6}{row['n_images_used']:>7.0f}"
+                      f"{c_year:>8.2f}{c_cut:>7.2f}{row['power']:>8.3f} | "
+                      + "".join(f"{row[f'power_{k}']:>15.3f}" for k in keys) + " | "
+                      + "".join(f"{row[f'mean_{k}']:>15.3f}"
+                                for k in ("C_year", "C_cutpoint", "C_noise"))
+                      + f"{'  X' if clipped else '   ':>6}")
 
     write_csv(OUT_DIR / "p2a_power_grid.csv", out_rows)
     (OUT_DIR / "p2a_power_summary.json").write_text(json.dumps({
@@ -320,6 +350,10 @@ def main():
         "d_noise_min": D_NOISE_MIN,
         "target_power": 0.80,
         "bootstrap_strata": "cohort (2024 / 2026); patients resampled whole",
+        "patient_fractions": list(PATIENT_FRACTIONS),
+        "patient_axis_note": ("코호트가 유한하므로(2024 RB 3·4 보유 45명, 2026 33명) "
+                              "환자 수는 축소 방향으로만 스캔한다. frac=1.0 이 전수이며 "
+                              "그보다 큰 표본은 이 데이터에 존재하지 않는다."),
         "base_move_rate": BASE_MOVE,
         "rate_source_note": ("기저 이동률 0.155 = Phase 1 L4 RB 자기일치에서 유도 "
                              "(ACC 0.6891 → 불일치 0.3109, MAE 0.3361 로 인접 이동 확인, "
