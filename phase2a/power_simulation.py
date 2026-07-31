@@ -34,11 +34,19 @@ N_SIM = 1000
 N_BOOT = 5000              # plan §4.5 최소 5,000회
 SEED = 20260729
 
-# ── 판정 규칙 ──
-# plan §4.2 는 단측 검정이므로 단측 하한(5% 분위수)을 쓴다. 양측 2.5% 하한은 과보수적이다.
+# ── 판정 규칙 (plan_phase2A_v2.md §4.2·§4.4) ──
+# 공동 1차 양성 = C_year·C_cutpoint 둘 다  (1) bootstrap CI 하한 > 0  그리고
+#                                          (2) 점추정 ≥ d_min = 0.10
+# 유의수준은 각각 단측 α=0.05 이므로 하한은 5% 분위수다. 목표 power 80%.
 ALPHA = 0.05
 NULL_MARGIN = 0.0
-REQUIRE_C_NOISE = True     # §6 "C_noise 가 양수" 를 진행 판정에 함께 요구
+D_MIN = 0.10               # 공동 1차 최소 검출 효과크기
+D_NOISE_MIN = 0.05         # 보조 C_noise 최소 검출 효과크기
+D_ROI_MIN = 0.05           # 보조 C_ROI 최소 검출 효과크기 (판독 후 분석에서 사용)
+
+# C_noise 는 v2 §4.3 의 **보조** 평가변수다. 공동 1차를 대체하지 않으므로 검정력은
+# 공동 1차만으로 계산한다. True 로 두면 보조 조건까지 묶은 보수적 검정력이 나온다.
+REQUIRE_C_NOISE = False
 
 # ── 시나리오 격자 (참값) ──
 C_YEAR_GRID = (0.05, 0.10, 0.15, 0.20, 0.25)
@@ -195,11 +203,23 @@ def contrasts_from(M):
             "C_year": su24 - su26, "C_cutpoint": su24 - slo, "C_noise": su24 - sdup}
 
 
-def bootstrap_lower(M, keys, rng):
-    """환자 단위 stratified bootstrap 단측 하한 (§4.5)."""
-    n = M.shape[0]
-    w = rng.multinomial(n, np.full(n, 1.0 / n), size=N_BOOT)   # (N_BOOT, n_pat)
-    c = contrasts_from(w @ M)
+def bootstrap_lower(M, strata, keys, rng):
+    """환자 단위 stratified bootstrap 단측 하한 (§4.5).
+
+    층은 코호트(2024 / 2026)다. 층별로 환자를 재표집해 각 층의 환자 수를 고정하고,
+    한 환자의 모든 영상·ROI 는 그 환자 행에 접혀 있으므로 함께 재표집된다.
+    대상군별로 따로 재표집하면 표적군과 하위 경계 대조군이 공유하는 기존 등급 3
+    환자의 연동이 끊기고, §4.5 의 '같은 bootstrap resample 에서 산출' 도 깨진다.
+    """
+    total = None
+    for idx in strata:
+        n = len(idx)
+        if n == 0:
+            continue
+        w = rng.multinomial(n, np.full(n, 1.0 / n), size=N_BOOT)   # (N_BOOT, n_pat_stratum)
+        part = w @ M[idx]
+        total = part if total is None else total + part
+    c = contrasts_from(total)
     out = {}
     for k in keys:
         v = c[k][~np.isnan(c[k])]
@@ -233,23 +253,29 @@ def main():
               "lower_ctl": [r for r in base if int(r.get("control_2024_rb_lower", 0))]}
     pats = sorted({r["patient_id"] for r in base})
     pat_index = {p: i for i, p in enumerate(pats)}
+    # 층 = 코호트. 환자는 한 연도에만 속한다.
+    pat_year = {r["patient_id"]: r["year"] for r in base}
+    strata = [np.array([pat_index[p] for p in pats if pat_year[p] == y], dtype=int)
+              for y in ("2024", "2026")]
 
     keys = ["C_year", "C_cutpoint"] + (["C_noise"] if REQUIRE_C_NOISE else [])
+    dmin = {"C_year": D_MIN, "C_cutpoint": D_MIN, "C_noise": D_NOISE_MIN}
     W = 76
     print("=" * W)
     print("power_simulation — Phase 2A §4.4 검정력 (공동 1차 " + " · ".join(keys) + ")")
     print("=" * W)
     print(f"  영상 {len(base)}장 · 환자 {len(pats)}명 · 중복쌍 {len(pairs)}개 · "
           f"n_sim {N_SIM} · n_boot {N_BOOT}")
-    print(f"\n  {'C_year':>8}{'C_cut':>8}{'power':>9}{'평균 C_year':>13}"
-          f"{'평균 C_cut':>12}{'clip':>6}")
+    print(f"\n  {'C_year':>7}{'C_cut':>7}{'power':>8} | " + "".join(f"{'p:'+k:>15}" for k in keys)
+          + " | " + "".join(f"{'평균 '+k:>15}" for k in ("C_year", "C_cutpoint", "C_noise"))
+          + f"{'clip':>6}")
 
     out_rows = []
     for c_year in C_YEAR_GRID:
         for c_cut in C_CUTPOINT_GRID:
             rates = scenario_rates(c_year, c_cut)
             clipped = rates.pop("_clipped")
-            hit, acc = 0, defaultdict(list)
+            hit, acc, per = 0, defaultdict(list), defaultdict(int)
             for _ in range(N_SIM):
                 reread = draw_reread(rows, rates, rng)
                 M = patient_stats(pat_index, groups, pairs, reread)
@@ -257,10 +283,17 @@ def main():
                 for k, v in pt.items():
                     if not np.isnan(v):
                         acc[k].append(float(v))
-                lo = bootstrap_lower(M, keys, rng)
-                hit += int(all(lo[k] > NULL_MARGIN for k in keys))
+                lo = bootstrap_lower(M, strata, keys, rng)
+                # v2 §4.2 성공 조건 = CI 하한 > 0 **그리고** 점추정 ≥ d_min.
+                # 조건별 통과율을 따로 남긴다. 공동 검정력만 보면 병목을 알 수 없다.
+                ok = {k: (lo[k] > NULL_MARGIN and not np.isnan(pt[k]) and pt[k] >= dmin[k])
+                      for k in keys}
+                for k, v in ok.items():
+                    per[k] += int(v)
+                hit += int(all(ok.values()))
             row = {"target_C_year": c_year, "target_C_cutpoint": c_cut,
                    "power": hit / N_SIM,
+                   **{f"power_{k}": per[k] / N_SIM for k in keys},
                    "mean_C_year": float(np.mean(acc["C_year"])) if acc["C_year"] else float("nan"),
                    "mean_C_cutpoint": float(np.mean(acc["C_cutpoint"])) if acc["C_cutpoint"] else float("nan"),
                    "mean_C_noise": float(np.mean(acc["C_noise"])) if acc["C_noise"] else float("nan"),
@@ -268,9 +301,11 @@ def main():
                    **{k: rates[k] for k in sorted(rates)},
                    "n_sim": N_SIM, "n_boot": N_BOOT, "patient_sigma": PATIENT_SIGMA}
             out_rows.append(row)
-            print(f"  {c_year:>8.2f}{c_cut:>8.2f}{row['power']:>9.3f}"
-                  f"{row['mean_C_year']:>13.3f}{row['mean_C_cutpoint']:>12.3f}"
-                  f"{'  X' if clipped else '   ':>6}")
+            print(f"  {c_year:>7.2f}{c_cut:>7.2f}{row['power']:>8.3f} | "
+                  + "".join(f"{row[f'power_{k}']:>15.3f}" for k in keys) + " | "
+                  + "".join(f"{row[f'mean_{k}']:>15.3f}"
+                            for k in ("C_year", "C_cutpoint", "C_noise"))
+                  + f"{'  X' if clipped else '   ':>6}")
 
     write_csv(OUT_DIR / "p2a_power_grid.csv", out_rows)
     (OUT_DIR / "p2a_power_summary.json").write_text(json.dumps({
@@ -278,7 +313,13 @@ def main():
         "n_images": len(base),
         "n_patients": len(pats),
         "n_duplicate_pairs": len(pairs),
-        "success_rule": f"one-sided lower{int((1 - ALPHA) * 100)} > {NULL_MARGIN} for " + ", ".join(keys),
+        "success_rule": (f"v2 §4.2: for {', '.join(keys)} — one-sided lower"
+                         f"{int((1 - ALPHA) * 100)} > {NULL_MARGIN} AND point estimate >= "
+                         f"d_min ({D_MIN} for joint primary, {D_NOISE_MIN} for C_noise)"),
+        "d_min": D_MIN,
+        "d_noise_min": D_NOISE_MIN,
+        "target_power": 0.80,
+        "bootstrap_strata": "cohort (2024 / 2026); patients resampled whole",
         "base_move_rate": BASE_MOVE,
         "rate_source_note": ("기저 이동률 0.155 = Phase 1 L4 RB 자기일치에서 유도 "
                              "(ACC 0.6891 → 불일치 0.3109, MAE 0.3361 로 인접 이동 확인, "
@@ -286,7 +327,9 @@ def main():
         "rows": out_rows,
     }, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    print(f"\n  clip=X 는 이동률이 [0, 0.95] 로 잘려 목표 C 를 달성 못한 시나리오다.")
+    print(f"\n  성공 = CI 하한 > {NULL_MARGIN} 그리고 점추정 ≥ d_min({D_MIN}). 목표 power 0.80.")
+    print(f"  p:… 는 조건별 통과율. 공동 power 가 낮으면 어느 조건이 병목인지 여기서 본다.")
+    print(f"  clip=X 는 이동률이 [0, 0.95] 로 잘려 목표 C 를 달성 못한 시나리오다.")
     print(f"  기저 이동률 {BASE_MOVE} = Phase 1 L4 RB 자기일치(ACC 0.6891)에서 유도.")
     print("\n" + "=" * W)
     print(f"[save] {OUT_DIR}")
