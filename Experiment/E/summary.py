@@ -131,6 +131,26 @@ def _boot_mean(vec, n=NBOOT, seed=0):
     return vec[rng.integers(0, len(vec), (n, len(vec)))].mean(1)
 
 
+def _boot_mean_joint(mat, seed, n=NBOOT):
+    """행(환자)을 통째로 재표집. 열(ROI/overall) 간 공분산이 보존된다.
+
+    ROI 를 하나씩 따로 부트스트랩하면 주변 CI 는 맞지만 ROI 간 공분산이 사라져
+    ROI 대비(RB − LT 등)를 낼 수 없다. 여기서 인덱스를 한 번만 뽑아 전 열에 공유한다.
+    """
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, mat.shape[0], (n, mat.shape[0]))
+    return mat[idx].mean(axis=1)
+
+
+# ROI 대비 — RB 가 사전 음성 참조보다 큰지. LT 는 Phase 1 에서 후보 가능성이 있어
+# 사전 음성 참조에서 제외한다(draft §5.3).
+CONTRASTS = {
+    "RB_minus_LT": ["LT"],
+    "RB_minus_mean_RT_LT_LB": ["RT", "LT", "LB"],
+    "RB_minus_mean_RT_LB": ["RT", "LB"],
+}
+
+
 # ═══════════════ 최종 판정 δ_corr = δ_obs + Δγ_matched/2 ═══════════════
 def build_verdict(dobs_map=None):
     """δ_obs 점추정은 E1 split 평균(dobs_map, results.json 유래 = git 재현) **단일 소스**를 쓴다.
@@ -148,47 +168,88 @@ def build_verdict(dobs_map=None):
         lo, hi = np.percentile(boot, [2.5, 97.5]); m = float(boot.mean())
         return [float(point + (lo - m)), float(point + (hi - m))]
 
-    keys = ["overall"] + ROI
+    keys = [k for k in (["overall"] + ROI) if dobs_map and k in dobs_map]
+    if not keys:
+        keys = []
+
+    # ── 열(키) 단위로 환자 벡터를 모아 한 번에 부트스트랩한다 ──
+    def _stack(getter):
+        cols = []
+        for key in keys:
+            v = getter(key)
+            if v is None:
+                return None
+            cols.append(np.asarray(v, dtype=float))
+        if len({len(c) for c in cols}) != 1:            # 키마다 환자 수가 다르면 결합 불가
+            return None
+        return np.column_stack(cols)
+
+    fwd = _stack(lambda k: _pooled_patient_bias("24to26", None if k == "overall" else k))
+    rev = _stack(lambda k: _pooled_patient_bias("26to24", None if k == "overall" else k))
+    have_npz = fwd is not None and rev is not None
+
+    def _indomain(src, root, year):
+        if not (src and root in src):
+            return None
+        return _stack(lambda k: src[root][year][k]["vec"] if k in src[root][year] else None)
+
+    m24, m26 = _indomain(matched, "matched", "2024"), _indomain(matched, "matched", "2026")
+    r24, r26 = _indomain(raw, "raw", "2024"), _indomain(raw, "raw", "2026")
+
+    dboot = None
+    if have_npz:                                        # δ_obs 구름 (키 간 공분산 보존)
+        dboot = (_boot_mean_joint(rev, seed=2) - _boot_mean_joint(fwd, seed=1)) / 2
+    corr_boot = corr_boot_r = None
+    if dboot is not None and m24 is not None and m26 is not None:
+        corr_boot = dboot + (_boot_mean_joint(m24, seed=3) - _boot_mean_joint(m26, seed=4)) / 2
+    if dboot is not None and r24 is not None and r26 is not None:
+        corr_boot_r = dboot + (_boot_mean_joint(r24, seed=5) - _boot_mean_joint(r26, seed=6)) / 2
+
     dc = {}
-    for key in keys:
-        roi = None if key == "overall" else key
-        if not (dobs_map and key in dobs_map):
-            continue
+    for i, key in enumerate(keys):
         dobs = float(dobs_map[key]["delta_obs"]); gamma = float(dobs_map[key]["gamma"])
         row = {"delta_obs": dobs, "gamma": gamma}
-        f = _pooled_patient_bias("24to26", roi)
-        r = _pooled_patient_bias("26to24", roi)
-        dboot = None
-        if f is not None and r is not None:          # npz 있으면 CI(점추정 중심)
-            dboot = (_boot_mean(r, seed=2) - _boot_mean(f, seed=1)) / 2
-            row["delta_obs_ci"] = _reci(dboot, dobs)
-        if matched and "matched" in matched:
-            try:
-                a = np.array(matched["matched"]["2024"][key]["vec"], dtype=float)
-                b = np.array(matched["matched"]["2026"][key]["vec"], dtype=float)
-                dg = float(a.mean() - b.mean())
-                row["delta_g_matched"] = dg
-                row["delta_corr"] = dobs + dg / 2
-                if dboot is not None:
-                    corr_boot = dboot + (_boot_mean(a, seed=3) - _boot_mean(b, seed=4)) / 2
-                    row["ci"] = _reci(corr_boot, row["delta_corr"])
-            except (KeyError, TypeError, ValueError):
-                pass
-        if raw and "raw" in raw:                         # 부록 B: 정합 전 δ_corr_raw = δ_obs + Δγ_raw/2
-            try:
-                ar = np.array(raw["raw"]["2024"][key]["vec"], dtype=float)
-                br = np.array(raw["raw"]["2026"][key]["vec"], dtype=float)
-                dgr = float(ar.mean() - br.mean())
-                row["delta_g_raw"] = dgr
-                row["delta_corr_raw"] = dobs + dgr / 2
-                if dboot is not None:
-                    corr_boot_r = dboot + (_boot_mean(ar, seed=5) - _boot_mean(br, seed=6)) / 2
-                    row["ci_raw"] = _reci(corr_boot_r, row["delta_corr_raw"])
-            except (KeyError, TypeError, ValueError):
-                pass
+        if dboot is not None:
+            row["delta_obs_ci"] = _reci(dboot[:, i], dobs)
+        if m24 is not None and m26 is not None:
+            dg = float(m24[:, i].mean() - m26[:, i].mean())
+            row["delta_g_matched"] = dg
+            row["delta_corr"] = dobs + dg / 2
+            if corr_boot is not None:
+                row["ci"] = _reci(corr_boot[:, i], row["delta_corr"])
+        if r24 is not None and r26 is not None:          # 부록 B: 정합 전 δ_corr_raw
+            dgr = float(r24[:, i].mean() - r26[:, i].mean())
+            row["delta_g_raw"] = dgr
+            row["delta_corr_raw"] = dobs + dgr / 2
+            if corr_boot_r is not None:
+                row["ci_raw"] = _reci(corr_boot_r[:, i], row["delta_corr_raw"])
         dc[key] = row
 
+    # ── ROI 대비 (탐색적, 다중성 미보정) ──
+    contrasts, corr_mat = None, None
+    if corr_boot is not None and all(r in keys for r in ROI):
+        col = {k: i for i, k in enumerate(keys)}
+        # 점추정 중심으로 맞춘 구름에서 대비를 뽑는다(주변 CI 관례와 동일).
+        pt = np.array([dc[k].get("delta_corr", np.nan) for k in keys], dtype=float)
+        cloud = corr_boot - corr_boot.mean(axis=0) + pt
+        contrasts = {}
+        for name, others in CONTRASTS.items():
+            v = cloud[:, col["RB"]] - sum(cloud[:, col[o]] for o in others) / float(len(others))
+            lo, hi = np.percentile(v, [2.5, 97.5])
+            contrasts[name] = {
+                "estimate": float(v.mean()),
+                "ci_95_two_sided": [float(lo), float(hi)],
+                "p_one_sided_gt_0": float(np.mean(v <= 0.0)),
+            }
+        sub = cloud[:, [col[r] for r in ROI]]
+        corr_mat = {"roi_order": list(ROI), "matrix": np.corrcoef(sub, rowvar=False).tolist()}
+
     V = {"delta_corrected": dc,
+         "roi_contrasts": contrasts,
+         "roi_contrast_note": ("δ_corr 의 환자 단위 joint bootstrap 구름에서 산출. "
+                               "탐색적 분석이며 다중성을 보정하지 않았다. CI 는 양측 95% "
+                               "percentile, p 는 단측 bootstrap tail 비율이다."),
+         "roi_correlation": corr_mat,
          "E3_recovery_slope": (pos.get("recovery_slope") if pos else None),
          "E4_leakage": ([(c["train_frac"], c["delta_spurious"]) for c in neg["curve"]] if neg else None)}
     RESULT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -222,6 +283,18 @@ def build_verdict(dobs_map=None):
                 cir_s = f"[{cir[0]:+.3f},{cir[1]:+.3f}]" if cir else "-"
                 print(f"    {key:<8}Δγ_raw {row['delta_g_raw']:>+.3f}  "
                       f"δ_corr_raw {row['delta_corr_raw']:>+.3f}  {cir_s}")
+        if contrasts:
+            print(f"\n  [ROI 대비] δ_corr joint bootstrap · 탐색적 · 다중성 미보정")
+            print(f"    {'대비':<24}{'추정':>9}{'양측 95% CI':>22}{'단측 p':>9}")
+            for name, c in contrasts.items():
+                lo, hi = c["ci_95_two_sided"]
+                print(f"    {name:<24}{c['estimate']:>+9.4f}"
+                      f"{f'[{lo:+.3f},{hi:+.3f}]':>22}{c['p_one_sided_gt_0']:>9.4f}")
+        if corr_mat:
+            print(f"\n  [ROI 상관] δ_corr bootstrap 구름")
+            print("    " + " " * 6 + "".join(f"{r:>8}" for r in corr_mat["roi_order"]))
+            for i, r in enumerate(corr_mat["roi_order"]):
+                print(f"    {r:<6}" + "".join(f"{v:>8.3f}" for v in corr_mat["matrix"][i]))
         if pos and pos.get("recovery_slope") is not None:
             print(f"\n  [E3 양성대조] 복원 기울기 {pos['recovery_slope']:+.3f} (이상 1.0)")
         if neg and neg.get("curve"):
