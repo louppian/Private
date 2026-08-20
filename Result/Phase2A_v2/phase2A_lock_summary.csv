@@ -1,0 +1,9 @@
+﻿index,value
+ms_len,7
+mini_sequence_count,165
+total_presented_rows,1155
+presented_unique_images,831
+first_read_rows,831
+repeat_read_rows,324
+source_csv,CXR\unified_labels.csv
+master_csv,phase2A_master_1155.csv
